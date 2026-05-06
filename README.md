@@ -33,7 +33,6 @@ Instead of manually browsing folders and editing config files by hand, Captain's
 - scheduled reboots
 - logbook with filtering and export
 - community mod workflow tools
-- optional bundled WindroseRCON install and management for player count and player-list features
 
 ## Requirements
 
@@ -43,16 +42,6 @@ Instead of manually browsing folders and editing config files by hand, Captain's
 - Enough permissions to read and write your Windrose server files
 - It is recommended to run the app on the same machine that hosts the server, or on a machine with direct access to the server files
 
-## Optional RCON bundling
-
-Captain's Console can embed a bundled `version.dll` from the Apache-licensed `WindroseRCON` project so users can install RCON from inside the app without seeing extra release files.
-
-To include it in the build:
-
-- place `version.dll` in the project root before building
-- run the normal desktop build
-
-The desktop build script embeds the RCON DLL, notice text, and Apache license into the executable. Users can then install RCON from the `RCON` tab, and the third-party license can be viewed inside the app.
 
 ## Compile the application
 

@@ -69,22 +69,6 @@ namespace WindroseServerManager.Desktop
             helpToolTip.SetToolTip(modsApiKeyTextBox, "Enter the API key for the selected mod provider. It will be saved in your local app preferences.");
             helpToolTip.SetToolTip(saveModsApiKeyButton, "Save the API key for the currently selected mod provider.");
             helpToolTip.SetToolTip(openCurseForgeButton, "Open the selected provider's Windrose page in your browser.");
-            helpToolTip.SetToolTip(installRconButton, "Install WindroseRCON into the currently loaded server if a bundled or local version.dll is available.");
-            helpToolTip.SetToolTip(uninstallRconButton, "Remove WindroseRCON version.dll from the current server.");
-            helpToolTip.SetToolTip(saveRconSettingsButton, "Write the current RCON settings to windrosercon/settings.ini.");
-            helpToolTip.SetToolTip(testRconButton, "Connect to the configured local RCON server and request basic server info.");
-            helpToolTip.SetToolTip(refreshRconPlayersButton, "Refresh the live online player list through RCON.");
-            helpToolTip.SetToolTip(viewRconLicenseButton, "View the bundled WindroseRCON third-party notice and Apache license.");
-            helpToolTip.SetToolTip(rconBindAddressTextBox, "RCON bind address from windrosercon/settings.ini.");
-            helpToolTip.SetToolTip(rconPortNumeric, "TCP port used by WindroseRCON.");
-            helpToolTip.SetToolTip(rconPasswordTextBox, "Password required to authenticate with WindroseRCON.");
-            helpToolTip.SetToolTip(rconAllowedIpsTextBox, "Optional comma-separated allowlist of client IPs.");
-            helpToolTip.SetToolTip(rconMaxFailedAttemptsNumeric, "Number of failed authentication attempts allowed before temporary blocking.");
-            helpToolTip.SetToolTip(rconTimeoutNumeric, "Per-client socket timeout in seconds.");
-            helpToolTip.SetToolTip(rconEnableLoggingCheckBox, "Enable WindroseRCON activity logging.");
-            helpToolTip.SetToolTip(rconSecureEnabledCheckBox, "Enable the encrypted Secure RCON protocol.");
-            helpToolTip.SetToolTip(rconAesKeyTextBox, "AES key used by Secure RCON when enabled.");
-            helpToolTip.SetToolTip(rconPlayersTextBox, "Latest online player list returned by the RCON showplayers command.");
             helpToolTip.SetToolTip(openModsFolderButton, "Open the community-convention ~mods folder for the loaded server root.");
             helpToolTip.SetToolTip(importModFolderButton, "Copy an extracted mod folder into the current ~mods folder.");
             helpToolTip.SetToolTip(curseForgeSearchModeComboBox, "Keyword searches platform listings. Mod ID fetches one exact item when supported by the selected provider.");
@@ -1777,172 +1761,31 @@ namespace WindroseServerManager.Desktop
 
         private void InstallRconFiles()
         {
-            var win64Dir = GetRconWin64Directory();
-            if (string.IsNullOrWhiteSpace(win64Dir))
-            {
-                SetStatus("Load a server first so Captain's Console knows where to install RCON.", true);
-                return;
-            }
-
-            var bundledDllBytes = LoadEmbeddedBinaryResource(EmbeddedWindroseRconVersionDllResourceName);
-            var sourceDll = string.Empty;
-            if (bundledDllBytes == null || bundledDllBytes.Length == 0)
-            {
-                sourceDll = FindLocalRconVersionDllSource();
-            }
-
-            if ((bundledDllBytes == null || bundledDllBytes.Length == 0) && (string.IsNullOrWhiteSpace(sourceDll) || !File.Exists(sourceDll)))
-            {
-                SetStatus("No embedded or local WindroseRCON version.dll was found. Keep version.dll in the project root before building, or place it under WindroseRCON-main\\build\\windows\\x64\\release.", true);
-                return;
-            }
-
-            try
-            {
-                Directory.CreateDirectory(win64Dir);
-                var destinationDll = GetRconVersionDllPath();
-                if (bundledDllBytes != null && bundledDllBytes.Length > 0)
-                {
-                    File.WriteAllBytes(destinationDll, bundledDllBytes);
-                }
-                else
-                {
-                    File.Copy(sourceDll, destinationDll, true);
-                }
-                SaveRconSettings();
-                AppendLog("Installed WindroseRCON version.dll to " + destinationDll);
-                SetStatus("WindroseRCON installed. Start or restart the server so the DLL initializes.", false);
-            }
-            catch (Exception ex)
-            {
-                SetStatus("RCON install failed: " + ex.Message, true);
-            }
+            SetStatus("RCON integration has been removed from this public build.", true);
         }
 
         private void UninstallRconFiles()
         {
-            var destinationDll = GetRconVersionDllPath();
-            if (string.IsNullOrWhiteSpace(destinationDll) || !File.Exists(destinationDll))
-            {
-                SetStatus("No installed WindroseRCON version.dll was found for this server.", true);
-                return;
-            }
-
-            try
-            {
-                File.Delete(destinationDll);
-                RefreshRconStatusUi();
-                currentPlayerCountDisplay = "n/a";
-                playerCountValueLabel.Text = currentPlayerCountDisplay;
-                rconPlayersTextBox.Text = "RCON player list will appear here.";
-                AppendLog("Removed WindroseRCON version.dll from " + destinationDll);
-                SetStatus("WindroseRCON uninstalled. Restart the server if it is currently running.", false);
-            }
-            catch (Exception ex)
-            {
-                SetStatus("RCON uninstall failed: " + ex.Message, true);
-            }
+            SetStatus("RCON integration has been removed from this public build.", true);
         }
 
         private void SaveRconSettings()
         {
-            var settingsPath = GetRconSettingsPath();
-            if (string.IsNullOrWhiteSpace(settingsPath))
-            {
-                SetStatus("Load a server first so Captain's Console knows where to save RCON settings.", true);
-                return;
-            }
-
-            try
-            {
-                var settings = BuildRconSettingsFromUi();
-                var settingsDir = Path.GetDirectoryName(settingsPath);
-                if (!string.IsNullOrWhiteSpace(settingsDir))
-                {
-                    Directory.CreateDirectory(settingsDir);
-                }
-
-                var builder = new StringBuilder();
-                builder.AppendLine("# Windrose RCON Configuration");
-                builder.AppendLine();
-                builder.AppendLine("[RCON]");
-                builder.AppendLine("BindAddress=" + settings.BindAddress);
-                builder.AppendLine("Port=" + settings.Port);
-                builder.AppendLine("Password=" + settings.Password);
-                builder.AppendLine("AllowedIPs=" + settings.AllowedIPs);
-                builder.AppendLine("MaxFailedAttempts=" + settings.MaxFailedAttempts);
-                builder.AppendLine("Timeout=" + settings.TimeoutSeconds);
-                builder.AppendLine("EnableLogging=" + (settings.EnableLogging ? "true" : "false"));
-                builder.AppendLine();
-                builder.AppendLine("[SecureRCON]");
-                builder.AppendLine("Enabled=" + (settings.SecureEnabled ? "true" : "false"));
-                builder.AppendLine("AESKey=" + settings.AesKey);
-                File.WriteAllText(settingsPath, builder.ToString());
-                RefreshRconStatusUi();
-                AppendLog("Saved RCON settings to " + settingsPath);
-                SetStatus("RCON settings saved.", false);
-            }
-            catch (Exception ex)
-            {
-                SetStatus("Could not save RCON settings: " + ex.Message, true);
-            }
+            SetStatus("RCON integration has been removed from this public build.", true);
         }
 
         private void TestRconConnection()
         {
-            try
-            {
-                var response = ExecuteRconCommand(BuildRconSettingsFromUi(), "info");
-                rconPlayersTextBox.Text = response;
-                SetStatus("RCON connection succeeded.", false);
-            }
-            catch (Exception ex)
-            {
-                SetStatus("RCON test failed: " + ex.Message, true);
-            }
+            SetStatus("RCON integration has been removed from this public build.", true);
         }
 
         private void RefreshRconPlayers()
         {
-            try
-            {
-                var response = ExecuteRconCommand(BuildRconSettingsFromUi(), "showplayers");
-                rconPlayersTextBox.Text = string.IsNullOrWhiteSpace(response) ? "(no response)" : response;
-                SetStatus("RCON player list refreshed.", false);
-            }
-            catch (Exception ex)
-            {
-                SetStatus("Could not refresh RCON players: " + ex.Message, true);
-            }
+            SetStatus("RCON integration has been removed from this public build.", true);
         }
 
         private string FindLocalRconVersionDllSource()
         {
-            var candidates = new[]
-            {
-                Path.Combine(Application.StartupPath, "WindroseRCON-main", "build", "windows", "x64", "release", "version.dll"),
-                Path.Combine(Application.StartupPath, "WindroseRCON-main", "version.dll"),
-                Path.Combine(Application.StartupPath, "..", "WindroseRCON-main", "build", "windows", "x64", "release", "version.dll"),
-                Path.Combine(Application.StartupPath, "..", "WindroseRCON-main", "version.dll"),
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WindroseRCON-main", "build", "windows", "x64", "release", "version.dll"),
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WindroseRCON-main", "version.dll"),
-            };
-
-            foreach (var candidate in candidates)
-            {
-                try
-                {
-                    var fullPath = Path.GetFullPath(candidate);
-                    if (File.Exists(fullPath))
-                    {
-                        return fullPath;
-                    }
-                }
-                catch
-                {
-                }
-            }
-
             return string.Empty;
         }
 
@@ -3592,7 +3435,6 @@ namespace WindroseServerManager.Desktop
             BindSelectedWorldToUi();
             RefreshWarnings();
             PopulateModsInfo();
-            LoadRconSettingsIntoUi();
             RefreshModsProviderUi();
             setActiveWorldButton.Enabled = currentState.SelectedWorldKey != null;
             UpdateLaunchTargetUi();

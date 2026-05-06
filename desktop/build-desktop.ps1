@@ -6,9 +6,6 @@ $exe = Join-Path $outDir 'WindroseCaptainsConsole.exe'
 $csc = 'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe'
 $shipWheelPng = Join-Path $root 'shipwheel.png'
 $appIconIco = Join-Path $PSScriptRoot 'app-icon.ico'
-$bundledRconDll = Join-Path $root 'version.dll'
-$thirdPartyNotices = Join-Path $root 'THIRD_PARTY_NOTICES.md'
-$windroseRconLicense = Join-Path $root 'THIRD_PARTY_LICENSES\\WindroseRCON-LICENSE.txt'
 
 if (-not (Test-Path $csc)) {
   throw "Could not find C# compiler at $csc"
@@ -51,18 +48,6 @@ if (Test-Path $shipWheelPng) {
     $compilerArgs += "/win32icon:$appIconIco"
     $resourceArgs += "/resource:$appIconIco,WindroseServerManager.Resources.AppIcon"
   }
-}
-
-if (Test-Path $bundledRconDll) {
-  $resourceArgs += "/resource:$bundledRconDll,WindroseServerManager.Resources.WindroseRconVersionDll"
-}
-
-if (Test-Path $thirdPartyNotices) {
-  $resourceArgs += "/resource:$thirdPartyNotices,WindroseServerManager.Resources.WindroseRconNotice"
-}
-
-if (Test-Path $windroseRconLicense) {
-  $resourceArgs += "/resource:$windroseRconLicense,WindroseServerManager.Resources.WindroseRconLicense"
 }
 
 & $csc $compilerArgs $resourceArgs $sources

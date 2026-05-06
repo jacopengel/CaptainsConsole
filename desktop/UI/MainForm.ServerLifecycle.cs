@@ -352,8 +352,6 @@ namespace WindroseServerManager.Desktop
                 SetServerStateIndicator("Stopped", currentThemeColors.ServerStateStopped);
             }
 
-            SchedulePlayerCountRefresh(running || runningSignal);
-
             provisioningProgressBar.Visible = provisioningBusy;
 
             loadButton.Enabled = !provisioningBusy;
@@ -406,20 +404,6 @@ namespace WindroseServerManager.Desktop
             removeModButton.Enabled = !provisioningBusy && installedModsListView.SelectedItems.Count > 0;
             curseForgeSearchModeComboBox.Enabled = !provisioningBusy && SelectedModsProviderSupportsSearch();
             curseForgeSearchTextBox.Enabled = !provisioningBusy && SelectedModsProviderSupportsSearch();
-            installRconButton.Enabled = !provisioningBusy && !string.IsNullOrWhiteSpace(GetCurrentServerRoot());
-            uninstallRconButton.Enabled = !provisioningBusy && !string.IsNullOrWhiteSpace(GetCurrentServerRoot());
-            saveRconSettingsButton.Enabled = !provisioningBusy && !string.IsNullOrWhiteSpace(GetCurrentServerRoot());
-            testRconButton.Enabled = !provisioningBusy && !string.IsNullOrWhiteSpace(GetCurrentServerRoot());
-            refreshRconPlayersButton.Enabled = !provisioningBusy && !string.IsNullOrWhiteSpace(GetCurrentServerRoot());
-            rconBindAddressTextBox.Enabled = !provisioningBusy;
-            rconPortNumeric.Enabled = !provisioningBusy;
-            rconPasswordTextBox.Enabled = !provisioningBusy;
-            rconAllowedIpsTextBox.Enabled = !provisioningBusy;
-            rconMaxFailedAttemptsNumeric.Enabled = !provisioningBusy;
-            rconTimeoutNumeric.Enabled = !provisioningBusy;
-            rconEnableLoggingCheckBox.Enabled = !provisioningBusy;
-            rconSecureEnabledCheckBox.Enabled = !provisioningBusy;
-            rconAesKeyTextBox.Enabled = !provisioningBusy;
         }
 
         private void SetServerStateIndicator(string stateText, Color color)
@@ -427,7 +411,6 @@ namespace WindroseServerManager.Desktop
             serverStateDotPanel.BackColor = color;
             serverStateDotPanel.Invalidate();
             serverStateValueLabel.Text = stateText;
-            playerCountValueLabel.Text = currentPlayerCountDisplay;
         }
 
         private Process ResolveRunningServerProcess()
@@ -974,43 +957,6 @@ namespace WindroseServerManager.Desktop
 
         private void SchedulePlayerCountRefresh(bool serverLikelyRunning)
         {
-            if (!serverLikelyRunning)
-            {
-                currentPlayerCountDisplay = "n/a";
-                playerCountValueLabel.Text = currentPlayerCountDisplay;
-                return;
-            }
-
-            if (playerCountPollInFlight)
-            {
-                return;
-            }
-
-            if (lastPlayerCountPollUtc.HasValue && DateTime.UtcNow - lastPlayerCountPollUtc.Value < TimeSpan.FromSeconds(6))
-            {
-                return;
-            }
-
-            var rconSettings = LoadRconSettingsFromDisk();
-            if (rconSettings == null || string.IsNullOrWhiteSpace(rconSettings.Password))
-            {
-                currentPlayerCountDisplay = "no rcon";
-                playerCountValueLabel.Text = currentPlayerCountDisplay;
-                return;
-            }
-
-            playerCountPollInFlight = true;
-            lastPlayerCountPollUtc = DateTime.UtcNow;
-            System.Threading.ThreadPool.QueueUserWorkItem(delegate
-            {
-                var nextDisplay = QueryPlayerCountDisplay(rconSettings);
-                BeginInvoke((MethodInvoker)delegate
-                {
-                    currentPlayerCountDisplay = nextDisplay;
-                    playerCountValueLabel.Text = currentPlayerCountDisplay;
-                    playerCountPollInFlight = false;
-                });
-            });
         }
 
         private string GetCurrentServerRoot()
@@ -1134,28 +1080,11 @@ namespace WindroseServerManager.Desktop
 
         private void LoadRconSettingsIntoUi()
         {
-            var settings = LoadRconSettingsFromDisk() ?? CreateDefaultRconSettings();
-            rconBindAddressTextBox.Text = settings.BindAddress;
-            rconPortNumeric.Value = Math.Min(rconPortNumeric.Maximum, Math.Max(rconPortNumeric.Minimum, settings.Port));
-            rconPasswordTextBox.Text = settings.Password;
-            rconAllowedIpsTextBox.Text = settings.AllowedIPs;
-            rconMaxFailedAttemptsNumeric.Value = Math.Min(rconMaxFailedAttemptsNumeric.Maximum, Math.Max(rconMaxFailedAttemptsNumeric.Minimum, settings.MaxFailedAttempts));
-            rconTimeoutNumeric.Value = Math.Min(rconTimeoutNumeric.Maximum, Math.Max(rconTimeoutNumeric.Minimum, settings.TimeoutSeconds));
-            rconEnableLoggingCheckBox.Checked = settings.EnableLogging;
-            rconSecureEnabledCheckBox.Checked = settings.SecureEnabled;
-            rconAesKeyTextBox.Text = settings.AesKey;
-            RefreshRconStatusUi();
         }
 
         private void RefreshRconStatusUi()
         {
-            var versionDllPath = GetRconVersionDllPath();
-            var settingsPath = GetRconSettingsPath();
-            var hasDll = !string.IsNullOrWhiteSpace(versionDllPath) && File.Exists(versionDllPath);
-            var hasSettings = !string.IsNullOrWhiteSpace(settingsPath) && File.Exists(settingsPath);
-            rconStatusLabel.Text = hasDll
-                ? (hasSettings ? "RCON status: installed and configured" : "RCON status: version.dll installed, settings not found yet")
-                : "RCON status: not installed";
+            rconStatusLabel.Text = string.Empty;
         }
 
         private static RconSettingsSnapshot CreateDefaultRconSettings()

@@ -369,46 +369,7 @@ namespace WindroseServerManager.Desktop
 
         private void ShowRconLicenseDialog()
         {
-            var noticeText = LoadEmbeddedTextResource(EmbeddedWindroseRconNoticeResourceName);
-            var licenseText = LoadEmbeddedTextResource(EmbeddedWindroseRconLicenseResourceName);
-            var body = new StringBuilder();
-            body.AppendLine("WindroseRCON");
-            body.AppendLine("Source: https://github.com/dkoz/WindroseRCON");
-            body.AppendLine("License: Apache License 2.0");
-            body.AppendLine();
-
-            if (!string.IsNullOrWhiteSpace(noticeText))
-            {
-                body.AppendLine(noticeText.Trim());
-                body.AppendLine();
-            }
-
-            if (!string.IsNullOrWhiteSpace(licenseText))
-            {
-                body.AppendLine(licenseText.Trim());
-            }
-
-            using (var dialog = new Form())
-            {
-                dialog.Text = "WindroseRCON License";
-                dialog.StartPosition = FormStartPosition.CenterParent;
-                dialog.Size = new Size(900, 700);
-                dialog.MinimumSize = new Size(700, 500);
-                dialog.BackColor = currentThemeColors.WindowBackground;
-                dialog.ForeColor = currentThemeColors.BodyForeground;
-
-                var textBox = new RichTextBox();
-                textBox.Dock = DockStyle.Fill;
-                textBox.ReadOnly = true;
-                textBox.WordWrap = false;
-                textBox.BorderStyle = BorderStyle.FixedSingle;
-                textBox.BackColor = currentThemeColors.InputBackground;
-                textBox.ForeColor = currentThemeColors.InputForeground;
-                textBox.Text = body.ToString();
-
-                dialog.Controls.Add(textBox);
-                dialog.ShowDialog(this);
-            }
+            SetStatus("RCON integration has been removed from this public build.", true);
         }
 
         private static Icon CreateIconFromBitmap(Bitmap sourceBitmap, int iconSize)
