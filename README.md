@@ -33,7 +33,6 @@ Instead of manually browsing folders and editing config files by hand, Captain's
 - scheduled reboots
 - logbook with filtering and export
 - community mod workflow tools
-- remembers your last window size and layout state
 
 ## Requirements
 
@@ -42,6 +41,47 @@ Instead of manually browsing folders and editing config files by hand, Captain's
 - Internet connection if you want to install or update the server through SteamCMD
 - Enough permissions to read and write your Windrose server files
 - It is recommended to run the app on the same machine that hosts the server, or on a machine with direct access to the server files
+
+## Compile the application
+
+Captain's Console is a Windows desktop application built from the C# source files under `desktop`.
+
+### What you need
+
+- Windows
+- .NET Framework C# compiler available at `C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe`
+- PowerShell
+
+### Build steps
+
+1. Open PowerShell in the project root.
+2. Run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\desktop\build-desktop.ps1
+```
+
+3. If the build succeeds, the compiled application will be created at:
+
+```text
+dist\WindroseCaptainsConsole.exe
+```
+
+## Run the application
+
+After building, launch the app by opening:
+
+```text
+dist\WindroseCaptainsConsole.exe
+```
+
+You can also run it from PowerShell:
+
+```powershell
+.\dist\WindroseCaptainsConsole.exe
+```
+
+If Windows blocks the file because it came from another machine or download source, right-click the executable, open `Properties`, and allow it to run if needed.
 
 ## Why use it
 
