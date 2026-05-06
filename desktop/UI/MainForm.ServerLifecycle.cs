@@ -8,6 +8,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
@@ -44,21 +45,24 @@ namespace WindroseServerManager.Desktop
                 var startInfo = new ProcessStartInfo();
                 if (currentLaunchTarget.Kind == "batch")
                 {
-                    startInfo.FileName = "cmd.exe";
-                    startInfo.Arguments = "/c \"" + currentLaunchTarget.Path + "\"";
+                    startInfo.FileName = currentLaunchTarget.Path;
+                    startInfo.Arguments = string.Empty;
+                    startInfo.WorkingDirectory = currentLaunchTarget.WorkingDirectory;
+                    startInfo.UseShellExecute = true;
+                    startInfo.CreateNoWindow = false;
+                    startInfo.WindowStyle = ProcessWindowStyle.Normal;
                 }
                 else
                 {
                     startInfo.FileName = currentLaunchTarget.Path;
                     startInfo.Arguments = string.Empty;
+                    startInfo.WorkingDirectory = currentLaunchTarget.WorkingDirectory;
+                    startInfo.UseShellExecute = false;
+                    startInfo.RedirectStandardOutput = true;
+                    startInfo.RedirectStandardError = true;
+                    startInfo.CreateNoWindow = false;
+                    startInfo.WindowStyle = ProcessWindowStyle.Normal;
                 }
-
-                startInfo.WorkingDirectory = currentLaunchTarget.WorkingDirectory;
-                startInfo.UseShellExecute = false;
-                startInfo.RedirectStandardOutput = true;
-                startInfo.RedirectStandardError = true;
-                startInfo.CreateNoWindow = false;
-                startInfo.WindowStyle = ProcessWindowStyle.Normal;
 
                 managedServerProcess = new Process();
                 managedServerProcess.StartInfo = startInfo;
@@ -86,26 +90,29 @@ namespace WindroseServerManager.Desktop
                     throw new InvalidOperationException("The server process could not be started.");
                 }
                 hasActiveServerSession = true;
-                managedServerProcess.OutputDataReceived += delegate(object sender, DataReceivedEventArgs args)
+                if (!startInfo.UseShellExecute)
                 {
-                    if (!string.IsNullOrEmpty(args.Data))
+                    managedServerProcess.OutputDataReceived += delegate(object sender, DataReceivedEventArgs args)
                     {
-                        lastServerOutputUtc = DateTime.UtcNow;
-                        ConsiderMarkingServerReady(args.Data);
-                        AppendLog(args.Data);
-                    }
-                };
-                managedServerProcess.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs args)
-                {
-                    if (!string.IsNullOrEmpty(args.Data))
+                        if (!string.IsNullOrEmpty(args.Data))
+                        {
+                            lastServerOutputUtc = DateTime.UtcNow;
+                            ConsiderMarkingServerReady(args.Data);
+                            AppendLog(args.Data);
+                        }
+                    };
+                    managedServerProcess.ErrorDataReceived += delegate(object sender, DataReceivedEventArgs args)
                     {
-                        lastServerOutputUtc = DateTime.UtcNow;
-                        ConsiderMarkingServerReady(args.Data);
-                        AppendLog("[stderr] " + args.Data);
-                    }
-                };
-                managedServerProcess.BeginOutputReadLine();
-                managedServerProcess.BeginErrorReadLine();
+                        if (!string.IsNullOrEmpty(args.Data))
+                        {
+                            lastServerOutputUtc = DateTime.UtcNow;
+                            ConsiderMarkingServerReady(args.Data);
+                            AppendLog("[stderr] " + args.Data);
+                        }
+                    };
+                    managedServerProcess.BeginOutputReadLine();
+                    managedServerProcess.BeginErrorReadLine();
+                }
 
                 AppendLog("Started server using " + currentLaunchTarget.DisplayName);
                 StartServerFileLogTail(currentState != null ? currentState.ServerRoot : installDirTextBox.Text.Trim());
@@ -345,6 +352,8 @@ namespace WindroseServerManager.Desktop
                 SetServerStateIndicator("Stopped", currentThemeColors.ServerStateStopped);
             }
 
+            SchedulePlayerCountRefresh(running || runningSignal);
+
             provisioningProgressBar.Visible = provisioningBusy;
 
             loadButton.Enabled = !provisioningBusy;
@@ -397,6 +406,20 @@ namespace WindroseServerManager.Desktop
             removeModButton.Enabled = !provisioningBusy && installedModsListView.SelectedItems.Count > 0;
             curseForgeSearchModeComboBox.Enabled = !provisioningBusy && SelectedModsProviderSupportsSearch();
             curseForgeSearchTextBox.Enabled = !provisioningBusy && SelectedModsProviderSupportsSearch();
+            installRconButton.Enabled = !provisioningBusy && !string.IsNullOrWhiteSpace(GetCurrentServerRoot());
+            uninstallRconButton.Enabled = !provisioningBusy && !string.IsNullOrWhiteSpace(GetCurrentServerRoot());
+            saveRconSettingsButton.Enabled = !provisioningBusy && !string.IsNullOrWhiteSpace(GetCurrentServerRoot());
+            testRconButton.Enabled = !provisioningBusy && !string.IsNullOrWhiteSpace(GetCurrentServerRoot());
+            refreshRconPlayersButton.Enabled = !provisioningBusy && !string.IsNullOrWhiteSpace(GetCurrentServerRoot());
+            rconBindAddressTextBox.Enabled = !provisioningBusy;
+            rconPortNumeric.Enabled = !provisioningBusy;
+            rconPasswordTextBox.Enabled = !provisioningBusy;
+            rconAllowedIpsTextBox.Enabled = !provisioningBusy;
+            rconMaxFailedAttemptsNumeric.Enabled = !provisioningBusy;
+            rconTimeoutNumeric.Enabled = !provisioningBusy;
+            rconEnableLoggingCheckBox.Enabled = !provisioningBusy;
+            rconSecureEnabledCheckBox.Enabled = !provisioningBusy;
+            rconAesKeyTextBox.Enabled = !provisioningBusy;
         }
 
         private void SetServerStateIndicator(string stateText, Color color)
@@ -404,6 +427,7 @@ namespace WindroseServerManager.Desktop
             serverStateDotPanel.BackColor = color;
             serverStateDotPanel.Invalidate();
             serverStateValueLabel.Text = stateText;
+            playerCountValueLabel.Text = currentPlayerCountDisplay;
         }
 
         private Process ResolveRunningServerProcess()
@@ -915,6 +939,18 @@ namespace WindroseServerManager.Desktop
                 return null;
             }
 
+            var batchForegroundPath = Path.Combine(serverRoot, "StartServerForeground.bat");
+            if (File.Exists(batchForegroundPath))
+            {
+                return new LaunchTarget(batchForegroundPath, "batch");
+            }
+
+            var batchPath = Path.Combine(serverRoot, "StartServer.bat");
+            if (File.Exists(batchPath))
+            {
+                return new LaunchTarget(batchPath, "batch");
+            }
+
             var windroseExePath = Path.Combine(serverRoot, "WindroseServer.exe");
             if (File.Exists(windroseExePath))
             {
@@ -933,19 +969,355 @@ namespace WindroseServerManager.Desktop
                 return new LaunchTarget(windroseShippingExePath, "exe");
             }
 
-            var batchForegroundPath = Path.Combine(serverRoot, "StartServerForeground.bat");
-            if (File.Exists(batchForegroundPath))
-            {
-                return new LaunchTarget(batchForegroundPath, "batch");
-            }
-
-            var batchPath = Path.Combine(serverRoot, "StartServer.bat");
-            if (File.Exists(batchPath))
-            {
-                return new LaunchTarget(batchPath, "batch");
-            }
-
             return null;
+        }
+
+        private void SchedulePlayerCountRefresh(bool serverLikelyRunning)
+        {
+            if (!serverLikelyRunning)
+            {
+                currentPlayerCountDisplay = "n/a";
+                playerCountValueLabel.Text = currentPlayerCountDisplay;
+                return;
+            }
+
+            if (playerCountPollInFlight)
+            {
+                return;
+            }
+
+            if (lastPlayerCountPollUtc.HasValue && DateTime.UtcNow - lastPlayerCountPollUtc.Value < TimeSpan.FromSeconds(6))
+            {
+                return;
+            }
+
+            var rconSettings = LoadRconSettingsFromDisk();
+            if (rconSettings == null || string.IsNullOrWhiteSpace(rconSettings.Password))
+            {
+                currentPlayerCountDisplay = "no rcon";
+                playerCountValueLabel.Text = currentPlayerCountDisplay;
+                return;
+            }
+
+            playerCountPollInFlight = true;
+            lastPlayerCountPollUtc = DateTime.UtcNow;
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+            {
+                var nextDisplay = QueryPlayerCountDisplay(rconSettings);
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    currentPlayerCountDisplay = nextDisplay;
+                    playerCountValueLabel.Text = currentPlayerCountDisplay;
+                    playerCountPollInFlight = false;
+                });
+            });
+        }
+
+        private string GetCurrentServerRoot()
+        {
+            return currentState != null && !string.IsNullOrWhiteSpace(currentState.ServerRoot)
+                ? currentState.ServerRoot
+                : installDirTextBox.Text.Trim();
+        }
+
+        private string GetRconWin64Directory()
+        {
+            var serverRoot = GetCurrentServerRoot();
+            return string.IsNullOrWhiteSpace(serverRoot)
+                ? string.Empty
+                : Path.Combine(serverRoot, "R5", "Binaries", "Win64");
+        }
+
+        private string GetRconSettingsPath()
+        {
+            var win64Dir = GetRconWin64Directory();
+            return string.IsNullOrWhiteSpace(win64Dir)
+                ? string.Empty
+                : Path.Combine(win64Dir, "windrosercon", "settings.ini");
+        }
+
+        private string GetRconVersionDllPath()
+        {
+            var win64Dir = GetRconWin64Directory();
+            return string.IsNullOrWhiteSpace(win64Dir)
+                ? string.Empty
+                : Path.Combine(win64Dir, "version.dll");
+        }
+
+        private RconSettingsSnapshot LoadRconSettingsFromDisk()
+        {
+            var settingsPath = GetRconSettingsPath();
+            if (string.IsNullOrWhiteSpace(settingsPath) || !File.Exists(settingsPath))
+            {
+                return null;
+            }
+
+            var settings = CreateDefaultRconSettings();
+
+            var inRconSection = false;
+            var inSecureSection = false;
+            foreach (var rawLine in File.ReadAllLines(settingsPath))
+            {
+                var line = rawLine == null ? string.Empty : rawLine.Trim();
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#") || line.StartsWith(";"))
+                {
+                    continue;
+                }
+
+                if (line.StartsWith("[") && line.EndsWith("]"))
+                {
+                    inRconSection = string.Equals(line, "[RCON]", StringComparison.OrdinalIgnoreCase);
+                    inSecureSection = string.Equals(line, "[SecureRCON]", StringComparison.OrdinalIgnoreCase);
+                    continue;
+                }
+
+                var separatorIndex = line.IndexOf('=');
+                if (separatorIndex <= 0)
+                {
+                    continue;
+                }
+
+                var key = line.Substring(0, separatorIndex).Trim();
+                var value = line.Substring(separatorIndex + 1).Trim();
+                if (inRconSection && string.Equals(key, "BindAddress", StringComparison.OrdinalIgnoreCase))
+                {
+                    settings.BindAddress = value;
+                }
+                else if (inRconSection && string.Equals(key, "Port", StringComparison.OrdinalIgnoreCase))
+                {
+                    int parsedPort;
+                    if (int.TryParse(value, out parsedPort) && parsedPort > 0)
+                    {
+                        settings.Port = parsedPort;
+                    }
+                }
+                else if (inRconSection && string.Equals(key, "Password", StringComparison.OrdinalIgnoreCase))
+                {
+                    settings.Password = value;
+                }
+                else if (inRconSection && string.Equals(key, "AllowedIPs", StringComparison.OrdinalIgnoreCase))
+                {
+                    settings.AllowedIPs = value;
+                }
+                else if (inRconSection && string.Equals(key, "MaxFailedAttempts", StringComparison.OrdinalIgnoreCase))
+                {
+                    int parsedAttempts;
+                    if (int.TryParse(value, out parsedAttempts) && parsedAttempts > 0)
+                    {
+                        settings.MaxFailedAttempts = parsedAttempts;
+                    }
+                }
+                else if (inRconSection && string.Equals(key, "Timeout", StringComparison.OrdinalIgnoreCase))
+                {
+                    int parsedTimeout;
+                    if (int.TryParse(value, out parsedTimeout) && parsedTimeout > 0)
+                    {
+                        settings.TimeoutSeconds = parsedTimeout;
+                    }
+                }
+                else if (inRconSection && string.Equals(key, "EnableLogging", StringComparison.OrdinalIgnoreCase))
+                {
+                    settings.EnableLogging = value.Equals("true", StringComparison.OrdinalIgnoreCase);
+                }
+                else if (inSecureSection && string.Equals(key, "Enabled", StringComparison.OrdinalIgnoreCase))
+                {
+                    settings.SecureEnabled = value.Equals("true", StringComparison.OrdinalIgnoreCase);
+                }
+                else if (inSecureSection && string.Equals(key, "AESKey", StringComparison.OrdinalIgnoreCase))
+                {
+                    settings.AesKey = value;
+                }
+            }
+
+            return settings;
+        }
+
+        private void LoadRconSettingsIntoUi()
+        {
+            var settings = LoadRconSettingsFromDisk() ?? CreateDefaultRconSettings();
+            rconBindAddressTextBox.Text = settings.BindAddress;
+            rconPortNumeric.Value = Math.Min(rconPortNumeric.Maximum, Math.Max(rconPortNumeric.Minimum, settings.Port));
+            rconPasswordTextBox.Text = settings.Password;
+            rconAllowedIpsTextBox.Text = settings.AllowedIPs;
+            rconMaxFailedAttemptsNumeric.Value = Math.Min(rconMaxFailedAttemptsNumeric.Maximum, Math.Max(rconMaxFailedAttemptsNumeric.Minimum, settings.MaxFailedAttempts));
+            rconTimeoutNumeric.Value = Math.Min(rconTimeoutNumeric.Maximum, Math.Max(rconTimeoutNumeric.Minimum, settings.TimeoutSeconds));
+            rconEnableLoggingCheckBox.Checked = settings.EnableLogging;
+            rconSecureEnabledCheckBox.Checked = settings.SecureEnabled;
+            rconAesKeyTextBox.Text = settings.AesKey;
+            RefreshRconStatusUi();
+        }
+
+        private void RefreshRconStatusUi()
+        {
+            var versionDllPath = GetRconVersionDllPath();
+            var settingsPath = GetRconSettingsPath();
+            var hasDll = !string.IsNullOrWhiteSpace(versionDllPath) && File.Exists(versionDllPath);
+            var hasSettings = !string.IsNullOrWhiteSpace(settingsPath) && File.Exists(settingsPath);
+            rconStatusLabel.Text = hasDll
+                ? (hasSettings ? "RCON status: installed and configured" : "RCON status: version.dll installed, settings not found yet")
+                : "RCON status: not installed";
+        }
+
+        private static RconSettingsSnapshot CreateDefaultRconSettings()
+        {
+            return new RconSettingsSnapshot
+            {
+                BindAddress = "0.0.0.0",
+                Port = 27065,
+                Password = "windrose_admin",
+                AllowedIPs = string.Empty,
+                MaxFailedAttempts = 5,
+                TimeoutSeconds = 60,
+                EnableLogging = true,
+                SecureEnabled = false,
+                AesKey = string.Empty
+            };
+        }
+
+        private RconSettingsSnapshot BuildRconSettingsFromUi()
+        {
+            return new RconSettingsSnapshot
+            {
+                BindAddress = (rconBindAddressTextBox.Text ?? string.Empty).Trim(),
+                Port = Decimal.ToInt32(rconPortNumeric.Value),
+                Password = (rconPasswordTextBox.Text ?? string.Empty).Trim(),
+                AllowedIPs = (rconAllowedIpsTextBox.Text ?? string.Empty).Trim(),
+                MaxFailedAttempts = Decimal.ToInt32(rconMaxFailedAttemptsNumeric.Value),
+                TimeoutSeconds = Decimal.ToInt32(rconTimeoutNumeric.Value),
+                EnableLogging = rconEnableLoggingCheckBox.Checked,
+                SecureEnabled = rconSecureEnabledCheckBox.Checked,
+                AesKey = (rconAesKeyTextBox.Text ?? string.Empty).Trim()
+            };
+        }
+
+        private static string QueryPlayerCountDisplay(RconSettingsSnapshot settings)
+        {
+            try
+            {
+                var infoBody = ExecuteRconCommand(settings, "info");
+                if (string.IsNullOrWhiteSpace(infoBody))
+                {
+                    return "no data";
+                }
+
+                foreach (var rawLine in infoBody.Replace("\r\n", "\n").Split('\n'))
+                {
+                    var line = rawLine.Trim();
+                    if (!line.StartsWith("Players:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    var separator = line.IndexOf(':');
+                    if (separator >= 0 && separator + 1 < line.Length)
+                    {
+                        return line.Substring(separator + 1).Trim();
+                    }
+                }
+
+                return "unknown";
+            }
+            catch
+            {
+                return "offline";
+            }
+        }
+
+        private static string ExecuteRconCommand(RconSettingsSnapshot settings, string command)
+        {
+            using (var client = new TcpClient())
+            {
+                client.ReceiveTimeout = 2000;
+                client.SendTimeout = 2000;
+                var host = string.IsNullOrWhiteSpace(settings.BindAddress) || settings.BindAddress == "0.0.0.0" || settings.BindAddress == "::"
+                    ? "127.0.0.1"
+                    : settings.BindAddress;
+                client.Connect(host, settings.Port);
+                using (var stream = client.GetStream())
+                {
+                    var requestId = 1;
+                    SendRconPacket(stream, requestId, 3, settings.Password ?? string.Empty);
+                    var authResponse = ReceiveRconPacket(stream);
+                    if (authResponse == null || authResponse.Item1 == -1)
+                    {
+                        throw new InvalidOperationException("RCON authentication failed.");
+                    }
+
+                    requestId++;
+                    SendRconPacket(stream, requestId, 2, command);
+                    var response = ReceiveRconPacket(stream);
+                    return response != null ? response.Item3 : string.Empty;
+                }
+            }
+        }
+
+        private static void SendRconPacket(NetworkStream stream, int requestId, int packetType, string body)
+        {
+            var bodyBytes = Encoding.UTF8.GetBytes((body ?? string.Empty) + "\0");
+            var packetSize = bodyBytes.Length + 10;
+            var packet = new List<byte>(packetSize + 4);
+            packet.AddRange(BitConverter.GetBytes(packetSize));
+            packet.AddRange(BitConverter.GetBytes(requestId));
+            packet.AddRange(BitConverter.GetBytes(packetType));
+            packet.AddRange(bodyBytes);
+            packet.Add(0);
+            stream.Write(packet.ToArray(), 0, packet.Count);
+        }
+
+        private static Tuple<int, int, string> ReceiveRconPacket(NetworkStream stream)
+        {
+            var sizeBuffer = ReadExact(stream, 4);
+            if (sizeBuffer == null)
+            {
+                return null;
+            }
+
+            var size = BitConverter.ToInt32(sizeBuffer, 0);
+            if (size < 10 || size > 65536)
+            {
+                return null;
+            }
+
+            var data = ReadExact(stream, size);
+            if (data == null || data.Length < 10)
+            {
+                return null;
+            }
+
+            var requestId = BitConverter.ToInt32(data, 0);
+            var packetType = BitConverter.ToInt32(data, 4);
+            var bodyLength = Math.Max(0, data.Length - 10);
+            var body = bodyLength > 0 ? Encoding.UTF8.GetString(data, 8, bodyLength) : string.Empty;
+            return Tuple.Create(requestId, packetType, body.TrimEnd('\0'));
+        }
+
+        private static byte[] ReadExact(NetworkStream stream, int count)
+        {
+            var buffer = new byte[count];
+            var offset = 0;
+            while (offset < count)
+            {
+                var read = stream.Read(buffer, offset, count - offset);
+                if (read <= 0)
+                {
+                    return null;
+                }
+                offset += read;
+            }
+            return buffer;
+        }
+
+        private sealed class RconSettingsSnapshot
+        {
+            public string BindAddress { get; set; }
+            public int Port { get; set; }
+            public string Password { get; set; }
+            public string AllowedIPs { get; set; }
+            public int MaxFailedAttempts { get; set; }
+            public int TimeoutSeconds { get; set; }
+            public bool EnableLogging { get; set; }
+            public bool SecureEnabled { get; set; }
+            public string AesKey { get; set; }
         }
     }
 }

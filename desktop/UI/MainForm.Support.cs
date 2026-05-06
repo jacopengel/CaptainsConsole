@@ -8,6 +8,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
@@ -243,6 +244,12 @@ namespace WindroseServerManager.Desktop
 
         private static Icon CreateAppIcon()
         {
+            var embeddedIcon = LoadEmbeddedIconResource(EmbeddedAppIconResourceName);
+            if (embeddedIcon != null)
+            {
+                return embeddedIcon;
+            }
+
             var shipWheelImage = LoadShipWheelBitmap();
             if (shipWheelImage != null)
             {
@@ -253,6 +260,31 @@ namespace WindroseServerManager.Desktop
             }
 
             return CreateFallbackAppIcon();
+        }
+
+        private static Icon LoadEmbeddedIconResource(string resourceName)
+        {
+            try
+            {
+                using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName))
+                {
+                    if (stream == null)
+                    {
+                        return null;
+                    }
+
+                    using (var memory = new MemoryStream())
+                    {
+                        stream.CopyTo(memory);
+                        memory.Position = 0;
+                        return new Icon(memory);
+                    }
+                }
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static Icon CreateFallbackAppIcon()
@@ -296,6 +328,87 @@ namespace WindroseServerManager.Desktop
             }
 
             return Icon.FromHandle(bitmap.GetHicon());
+        }
+
+        private static byte[] LoadEmbeddedBinaryResource(string resourceName)
+        {
+            if (string.IsNullOrWhiteSpace(resourceName))
+            {
+                return null;
+            }
+
+            try
+            {
+                using (var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName))
+                {
+                    if (stream == null)
+                    {
+                        return null;
+                    }
+
+                    using (var memory = new MemoryStream())
+                    {
+                        stream.CopyTo(memory);
+                        return memory.ToArray();
+                    }
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static string LoadEmbeddedTextResource(string resourceName)
+        {
+            var bytes = LoadEmbeddedBinaryResource(resourceName);
+            return bytes == null || bytes.Length == 0
+                ? string.Empty
+                : Encoding.UTF8.GetString(bytes);
+        }
+
+        private void ShowRconLicenseDialog()
+        {
+            var noticeText = LoadEmbeddedTextResource(EmbeddedWindroseRconNoticeResourceName);
+            var licenseText = LoadEmbeddedTextResource(EmbeddedWindroseRconLicenseResourceName);
+            var body = new StringBuilder();
+            body.AppendLine("WindroseRCON");
+            body.AppendLine("Source: https://github.com/dkoz/WindroseRCON");
+            body.AppendLine("License: Apache License 2.0");
+            body.AppendLine();
+
+            if (!string.IsNullOrWhiteSpace(noticeText))
+            {
+                body.AppendLine(noticeText.Trim());
+                body.AppendLine();
+            }
+
+            if (!string.IsNullOrWhiteSpace(licenseText))
+            {
+                body.AppendLine(licenseText.Trim());
+            }
+
+            using (var dialog = new Form())
+            {
+                dialog.Text = "WindroseRCON License";
+                dialog.StartPosition = FormStartPosition.CenterParent;
+                dialog.Size = new Size(900, 700);
+                dialog.MinimumSize = new Size(700, 500);
+                dialog.BackColor = currentThemeColors.WindowBackground;
+                dialog.ForeColor = currentThemeColors.BodyForeground;
+
+                var textBox = new RichTextBox();
+                textBox.Dock = DockStyle.Fill;
+                textBox.ReadOnly = true;
+                textBox.WordWrap = false;
+                textBox.BorderStyle = BorderStyle.FixedSingle;
+                textBox.BackColor = currentThemeColors.InputBackground;
+                textBox.ForeColor = currentThemeColors.InputForeground;
+                textBox.Text = body.ToString();
+
+                dialog.Controls.Add(textBox);
+                dialog.ShowDialog(this);
+            }
         }
 
         private static Icon CreateIconFromBitmap(Bitmap sourceBitmap, int iconSize)

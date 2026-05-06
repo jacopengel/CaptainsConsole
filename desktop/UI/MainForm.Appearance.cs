@@ -260,6 +260,12 @@ namespace WindroseServerManager.Desktop
             StyleButton(importModFolderButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
             StyleButton(searchCurseForgeButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
             StyleButton(installSelectedCurseForgeButton, currentThemeColors.ButtonWarning, currentThemeColors.ButtonText);
+            StyleButton(installRconButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
+            StyleButton(uninstallRconButton, currentThemeColors.ButtonDanger, currentThemeColors.ButtonText);
+            StyleButton(saveRconSettingsButton, currentThemeColors.ButtonWarning, currentThemeColors.ButtonText);
+            StyleButton(testRconButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
+            StyleButton(refreshRconPlayersButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
+            StyleButton(viewRconLicenseButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
             StyleButton(refreshInstalledModsButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
             StyleButton(enableModButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
             StyleButton(disableModButton, currentThemeColors.ButtonWarning, currentThemeColors.ButtonText);
@@ -278,6 +284,9 @@ namespace WindroseServerManager.Desktop
             processStatusLabel.ForeColor = currentThemeColors.MetaForeground;
             serverStateTextLabel.ForeColor = currentThemeColors.MetaForeground;
             serverStateValueLabel.ForeColor = currentThemeColors.MetaForeground;
+            playerCountTextLabel.ForeColor = currentThemeColors.MetaForeground;
+            playerCountValueLabel.ForeColor = currentThemeColors.MetaForeground;
+            rconStatusLabel.ForeColor = currentThemeColors.MetaForeground;
             themeLabel.ForeColor = currentThemeColors.HeaderForeground;
             themeComboBox.FlatStyle = FlatStyle.Flat;
             themeComboBox.BackColor = currentThemeColors.InputBackground;

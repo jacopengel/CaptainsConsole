@@ -69,6 +69,22 @@ namespace WindroseServerManager.Desktop
             helpToolTip.SetToolTip(modsApiKeyTextBox, "Enter the API key for the selected mod provider. It will be saved in your local app preferences.");
             helpToolTip.SetToolTip(saveModsApiKeyButton, "Save the API key for the currently selected mod provider.");
             helpToolTip.SetToolTip(openCurseForgeButton, "Open the selected provider's Windrose page in your browser.");
+            helpToolTip.SetToolTip(installRconButton, "Install WindroseRCON into the currently loaded server if a bundled or local version.dll is available.");
+            helpToolTip.SetToolTip(uninstallRconButton, "Remove WindroseRCON version.dll from the current server.");
+            helpToolTip.SetToolTip(saveRconSettingsButton, "Write the current RCON settings to windrosercon/settings.ini.");
+            helpToolTip.SetToolTip(testRconButton, "Connect to the configured local RCON server and request basic server info.");
+            helpToolTip.SetToolTip(refreshRconPlayersButton, "Refresh the live online player list through RCON.");
+            helpToolTip.SetToolTip(viewRconLicenseButton, "View the bundled WindroseRCON third-party notice and Apache license.");
+            helpToolTip.SetToolTip(rconBindAddressTextBox, "RCON bind address from windrosercon/settings.ini.");
+            helpToolTip.SetToolTip(rconPortNumeric, "TCP port used by WindroseRCON.");
+            helpToolTip.SetToolTip(rconPasswordTextBox, "Password required to authenticate with WindroseRCON.");
+            helpToolTip.SetToolTip(rconAllowedIpsTextBox, "Optional comma-separated allowlist of client IPs.");
+            helpToolTip.SetToolTip(rconMaxFailedAttemptsNumeric, "Number of failed authentication attempts allowed before temporary blocking.");
+            helpToolTip.SetToolTip(rconTimeoutNumeric, "Per-client socket timeout in seconds.");
+            helpToolTip.SetToolTip(rconEnableLoggingCheckBox, "Enable WindroseRCON activity logging.");
+            helpToolTip.SetToolTip(rconSecureEnabledCheckBox, "Enable the encrypted Secure RCON protocol.");
+            helpToolTip.SetToolTip(rconAesKeyTextBox, "AES key used by Secure RCON when enabled.");
+            helpToolTip.SetToolTip(rconPlayersTextBox, "Latest online player list returned by the RCON showplayers command.");
             helpToolTip.SetToolTip(openModsFolderButton, "Open the community-convention ~mods folder for the loaded server root.");
             helpToolTip.SetToolTip(importModFolderButton, "Copy an extracted mod folder into the current ~mods folder.");
             helpToolTip.SetToolTip(curseForgeSearchModeComboBox, "Keyword searches platform listings. Mod ID fetches one exact item when supported by the selected provider.");
@@ -178,16 +194,16 @@ namespace WindroseServerManager.Desktop
 
             try
             {
-                var backupFolder = EnsureBackupFolder();
-                var targetFolder = Path.Combine(backupFolder, "server-full-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
-                if (targetFolder.StartsWith(Path.GetFullPath(rootPath), StringComparison.OrdinalIgnoreCase))
+                var backupResult = CreateFullServerBackup(rootPath);
+                AppendLog("Created full server backup: " + backupResult.TargetFolder);
+                if (backupResult.SkippedFileCount > 0)
                 {
-                    throw new InvalidOperationException("Choose a backup folder outside the server install directory.");
+                    SetStatus("Full server backup created with " + backupResult.SkippedFileCount + " skipped live files. Check Live Log.", false);
                 }
-
-                CopyDirectory(rootPath, targetFolder);
-                AppendLog("Created full server backup: " + targetFolder);
-                SetStatus("Full server backup created.", false);
+                else
+                {
+                    SetStatus("Full server backup created.", false);
+                }
             }
             catch (Exception ex)
             {
@@ -419,10 +435,14 @@ namespace WindroseServerManager.Desktop
                 var backupType = scheduledBackupTypeComboBox.SelectedItem != null
                     ? scheduledBackupTypeComboBox.SelectedItem.ToString()
                     : "Captain + World Settings";
+                var backupSummary = "Scheduled backup completed.";
 
                 if (string.Equals(backupType, "Full Server", StringComparison.OrdinalIgnoreCase))
                 {
-                    BackupFullServer();
+                    var backupResult = CreateFullServerBackup(currentState.ServerRoot);
+                    backupSummary = backupResult.SkippedFileCount > 0
+                        ? "Scheduled full backup completed with " + backupResult.SkippedFileCount + " skipped live files."
+                        : "Scheduled full backup completed.";
                 }
                 else
                 {
@@ -437,11 +457,15 @@ namespace WindroseServerManager.Desktop
                 nextScheduledBackupUtc = DateTime.UtcNow.AddHours(intervalHours);
                 SavePreferences();
                 UpdateScheduledBackupNextLabel();
-                AppendLog("Scheduled backup completed.");
+                AppendLog(backupSummary);
             }
             catch (Exception ex)
             {
                 AppendLog("Scheduled backup failed: " + ex.Message);
+                var intervalHours = Decimal.ToInt32(scheduledBackupIntervalNumeric.Value);
+                nextScheduledBackupUtc = DateTime.UtcNow.AddHours(intervalHours);
+                SavePreferences();
+                UpdateScheduledBackupNextLabel();
             }
         }
 
@@ -1301,8 +1325,8 @@ namespace WindroseServerManager.Desktop
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
-                    CreateNoWindow = false,
-                    WindowStyle = ProcessWindowStyle.Normal
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
                 };
                 taskProcess.EnableRaisingEvents = true;
                 taskProcess.Exited += delegate
@@ -1749,6 +1773,177 @@ namespace WindroseServerManager.Desktop
 
             Directory.CreateDirectory(modsRoot);
             OpenPathInShell(modsRoot);
+        }
+
+        private void InstallRconFiles()
+        {
+            var win64Dir = GetRconWin64Directory();
+            if (string.IsNullOrWhiteSpace(win64Dir))
+            {
+                SetStatus("Load a server first so Captain's Console knows where to install RCON.", true);
+                return;
+            }
+
+            var bundledDllBytes = LoadEmbeddedBinaryResource(EmbeddedWindroseRconVersionDllResourceName);
+            var sourceDll = string.Empty;
+            if (bundledDllBytes == null || bundledDllBytes.Length == 0)
+            {
+                sourceDll = FindLocalRconVersionDllSource();
+            }
+
+            if ((bundledDllBytes == null || bundledDllBytes.Length == 0) && (string.IsNullOrWhiteSpace(sourceDll) || !File.Exists(sourceDll)))
+            {
+                SetStatus("No embedded or local WindroseRCON version.dll was found. Keep version.dll in the project root before building, or place it under WindroseRCON-main\\build\\windows\\x64\\release.", true);
+                return;
+            }
+
+            try
+            {
+                Directory.CreateDirectory(win64Dir);
+                var destinationDll = GetRconVersionDllPath();
+                if (bundledDllBytes != null && bundledDllBytes.Length > 0)
+                {
+                    File.WriteAllBytes(destinationDll, bundledDllBytes);
+                }
+                else
+                {
+                    File.Copy(sourceDll, destinationDll, true);
+                }
+                SaveRconSettings();
+                AppendLog("Installed WindroseRCON version.dll to " + destinationDll);
+                SetStatus("WindroseRCON installed. Start or restart the server so the DLL initializes.", false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus("RCON install failed: " + ex.Message, true);
+            }
+        }
+
+        private void UninstallRconFiles()
+        {
+            var destinationDll = GetRconVersionDllPath();
+            if (string.IsNullOrWhiteSpace(destinationDll) || !File.Exists(destinationDll))
+            {
+                SetStatus("No installed WindroseRCON version.dll was found for this server.", true);
+                return;
+            }
+
+            try
+            {
+                File.Delete(destinationDll);
+                RefreshRconStatusUi();
+                currentPlayerCountDisplay = "n/a";
+                playerCountValueLabel.Text = currentPlayerCountDisplay;
+                rconPlayersTextBox.Text = "RCON player list will appear here.";
+                AppendLog("Removed WindroseRCON version.dll from " + destinationDll);
+                SetStatus("WindroseRCON uninstalled. Restart the server if it is currently running.", false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus("RCON uninstall failed: " + ex.Message, true);
+            }
+        }
+
+        private void SaveRconSettings()
+        {
+            var settingsPath = GetRconSettingsPath();
+            if (string.IsNullOrWhiteSpace(settingsPath))
+            {
+                SetStatus("Load a server first so Captain's Console knows where to save RCON settings.", true);
+                return;
+            }
+
+            try
+            {
+                var settings = BuildRconSettingsFromUi();
+                var settingsDir = Path.GetDirectoryName(settingsPath);
+                if (!string.IsNullOrWhiteSpace(settingsDir))
+                {
+                    Directory.CreateDirectory(settingsDir);
+                }
+
+                var builder = new StringBuilder();
+                builder.AppendLine("# Windrose RCON Configuration");
+                builder.AppendLine();
+                builder.AppendLine("[RCON]");
+                builder.AppendLine("BindAddress=" + settings.BindAddress);
+                builder.AppendLine("Port=" + settings.Port);
+                builder.AppendLine("Password=" + settings.Password);
+                builder.AppendLine("AllowedIPs=" + settings.AllowedIPs);
+                builder.AppendLine("MaxFailedAttempts=" + settings.MaxFailedAttempts);
+                builder.AppendLine("Timeout=" + settings.TimeoutSeconds);
+                builder.AppendLine("EnableLogging=" + (settings.EnableLogging ? "true" : "false"));
+                builder.AppendLine();
+                builder.AppendLine("[SecureRCON]");
+                builder.AppendLine("Enabled=" + (settings.SecureEnabled ? "true" : "false"));
+                builder.AppendLine("AESKey=" + settings.AesKey);
+                File.WriteAllText(settingsPath, builder.ToString());
+                RefreshRconStatusUi();
+                AppendLog("Saved RCON settings to " + settingsPath);
+                SetStatus("RCON settings saved.", false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus("Could not save RCON settings: " + ex.Message, true);
+            }
+        }
+
+        private void TestRconConnection()
+        {
+            try
+            {
+                var response = ExecuteRconCommand(BuildRconSettingsFromUi(), "info");
+                rconPlayersTextBox.Text = response;
+                SetStatus("RCON connection succeeded.", false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus("RCON test failed: " + ex.Message, true);
+            }
+        }
+
+        private void RefreshRconPlayers()
+        {
+            try
+            {
+                var response = ExecuteRconCommand(BuildRconSettingsFromUi(), "showplayers");
+                rconPlayersTextBox.Text = string.IsNullOrWhiteSpace(response) ? "(no response)" : response;
+                SetStatus("RCON player list refreshed.", false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus("Could not refresh RCON players: " + ex.Message, true);
+            }
+        }
+
+        private string FindLocalRconVersionDllSource()
+        {
+            var candidates = new[]
+            {
+                Path.Combine(Application.StartupPath, "WindroseRCON-main", "build", "windows", "x64", "release", "version.dll"),
+                Path.Combine(Application.StartupPath, "WindroseRCON-main", "version.dll"),
+                Path.Combine(Application.StartupPath, "..", "WindroseRCON-main", "build", "windows", "x64", "release", "version.dll"),
+                Path.Combine(Application.StartupPath, "..", "WindroseRCON-main", "version.dll"),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WindroseRCON-main", "build", "windows", "x64", "release", "version.dll"),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WindroseRCON-main", "version.dll"),
+            };
+
+            foreach (var candidate in candidates)
+            {
+                try
+                {
+                    var fullPath = Path.GetFullPath(candidate);
+                    if (File.Exists(fullPath))
+                    {
+                        return fullPath;
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return string.Empty;
         }
 
         private void ImportModFolder()
@@ -2500,7 +2695,7 @@ namespace WindroseServerManager.Desktop
             {
                 foreach (var pair in headers)
                 {
-                    request.Headers[pair.Key] = pair.Value;
+                    ApplyRequestHeader(request, pair.Key, pair.Value);
                 }
             }
 
@@ -2523,7 +2718,7 @@ namespace WindroseServerManager.Desktop
             {
                 foreach (var pair in headers)
                 {
-                    request.Headers[pair.Key] = pair.Value;
+                    ApplyRequestHeader(request, pair.Key, pair.Value);
                 }
             }
 
@@ -2533,6 +2728,22 @@ namespace WindroseServerManager.Desktop
             {
                 responseStream.CopyTo(fileStream);
             }
+        }
+
+        private static void ApplyRequestHeader(HttpWebRequest request, string key, string value)
+        {
+            if (request == null || string.IsNullOrWhiteSpace(key))
+            {
+                return;
+            }
+
+            if (string.Equals(key, "Accept", StringComparison.OrdinalIgnoreCase))
+            {
+                request.Accept = value;
+                return;
+            }
+
+            request.Headers[key] = value;
         }
 
         private CurseForgeFileData SelectBestDownloadableFile(string apiKey, CurseForgeModData mod)
@@ -2755,18 +2966,132 @@ namespace WindroseServerManager.Desktop
             public string InstalledUtc { get; set; }
         }
 
-        private static void CopyDirectory(string sourceDir, string destinationDir)
+        private FullServerBackupResult CreateFullServerBackup(string rootPath)
+        {
+            var backupFolder = EnsureBackupFolder();
+            var targetFolder = Path.Combine(backupFolder, "server-full-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+            if (targetFolder.StartsWith(Path.GetFullPath(rootPath), StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Choose a backup folder outside the server install directory.");
+            }
+
+            var skippedFiles = new List<string>();
+            CopyDirectory(rootPath, targetFolder, skippedFiles);
+            foreach (var skippedFile in skippedFiles)
+            {
+                AppendLog("[backup skipped] " + skippedFile);
+            }
+
+            return new FullServerBackupResult
+            {
+                TargetFolder = targetFolder,
+                SkippedFileCount = skippedFiles.Count
+            };
+        }
+
+        private static void CopyDirectory(string sourceDir, string destinationDir, IList<string> skippedFiles = null)
         {
             Directory.CreateDirectory(destinationDir);
             foreach (var file in Directory.GetFiles(sourceDir))
             {
-                File.Copy(file, Path.Combine(destinationDir, Path.GetFileName(file)), true);
+                var destinationFile = Path.Combine(destinationDir, Path.GetFileName(file));
+                try
+                {
+                    CopyFileAllowingReadersAndWriters(file, destinationFile);
+                }
+                catch (IOException ex)
+                {
+                    if (skippedFiles == null || !ShouldSkipLockedBackupFile(file))
+                    {
+                        throw;
+                    }
+
+                    skippedFiles.Add(file + " (" + ex.Message + ")");
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    if (skippedFiles == null || !ShouldSkipLockedBackupFile(file))
+                    {
+                        throw;
+                    }
+
+                    skippedFiles.Add(file + " (" + ex.Message + ")");
+                }
             }
 
             foreach (var dir in Directory.GetDirectories(sourceDir))
             {
-                CopyDirectory(dir, Path.Combine(destinationDir, Path.GetFileName(dir)));
+                CopyDirectory(dir, Path.Combine(destinationDir, Path.GetFileName(dir)), skippedFiles);
             }
+        }
+
+        private static void CopyFileAllowingReadersAndWriters(string sourceFilePath, string destinationFilePath)
+        {
+            var destinationDir = Path.GetDirectoryName(destinationFilePath);
+            if (!string.IsNullOrWhiteSpace(destinationDir))
+            {
+                Directory.CreateDirectory(destinationDir);
+            }
+
+            Exception lastError = null;
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                try
+                {
+                    using (var sourceStream = new FileStream(sourceFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+                    using (var destinationStream = new FileStream(destinationFilePath, FileMode.Create, FileAccess.Write, FileShare.None))
+                    {
+                        sourceStream.CopyTo(destinationStream);
+                        destinationStream.Flush(true);
+                        return;
+                    }
+                }
+                catch (IOException ex)
+                {
+                    lastError = ex;
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    lastError = ex;
+                }
+
+                System.Threading.Thread.Sleep(150);
+            }
+
+            if (lastError != null)
+            {
+                throw lastError;
+            }
+        }
+
+        private static bool ShouldSkipLockedBackupFile(string filePath)
+        {
+            var extension = Path.GetExtension(filePath);
+            var fileName = Path.GetFileName(filePath);
+            if (string.Equals(extension, ".log", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".tmp", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".lock", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (string.Equals(fileName, "LOCK", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(fileName, "CURRENT", StringComparison.OrdinalIgnoreCase)
+                || fileName.StartsWith("LOG", StringComparison.OrdinalIgnoreCase)
+                || fileName.StartsWith("MANIFEST-", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var normalized = filePath.Replace('/', '\\');
+            return normalized.IndexOf("\\R5\\Saved\\Logs\\", StringComparison.OrdinalIgnoreCase) >= 0
+                || normalized.IndexOf("\\windrosercon\\", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private sealed class FullServerBackupResult
+        {
+            public string TargetFolder { get; set; }
+            public int SkippedFileCount { get; set; }
         }
 
         private void WireFieldEvents()
@@ -3267,6 +3592,7 @@ namespace WindroseServerManager.Desktop
             BindSelectedWorldToUi();
             RefreshWarnings();
             PopulateModsInfo();
+            LoadRconSettingsIntoUi();
             RefreshModsProviderUi();
             setActiveWorldButton.Enabled = currentState.SelectedWorldKey != null;
             UpdateLaunchTargetUi();

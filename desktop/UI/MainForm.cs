@@ -8,6 +8,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
@@ -24,6 +25,10 @@ namespace WindroseServerManager.Desktop
         private const string SteamCmdDownloadUrl = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip";
         private const string ModProviderCurseForge = "CurseForge";
         private const string ModProviderNexusMods = "Nexus Mods";
+        private const string EmbeddedAppIconResourceName = "WindroseServerManager.Resources.AppIcon";
+        private const string EmbeddedWindroseRconVersionDllResourceName = "WindroseServerManager.Resources.WindroseRconVersionDll";
+        private const string EmbeddedWindroseRconNoticeResourceName = "WindroseServerManager.Resources.WindroseRconNotice";
+        private const string EmbeddedWindroseRconLicenseResourceName = "WindroseServerManager.Resources.WindroseRconLicense";
         private const int CurseForgeGameId = 99078;
         private const int SidebarPreferredWidth = 320;
         private const int SteamCmdMissingConfigurationRetryLimit = 2;
@@ -69,6 +74,12 @@ namespace WindroseServerManager.Desktop
         private readonly Button disableModButton;
         private readonly Button updateModButton;
         private readonly Button removeModButton;
+        private readonly Button installRconButton;
+        private readonly Button uninstallRconButton;
+        private readonly Button saveRconSettingsButton;
+        private readonly Button testRconButton;
+        private readonly Button refreshRconPlayersButton;
+        private readonly Button viewRconLicenseButton;
         private readonly Button setActiveWorldButton;
         private readonly Button toggleWarningsButton;
         private readonly Label statusLabel;
@@ -76,6 +87,8 @@ namespace WindroseServerManager.Desktop
         private readonly Label processStatusLabel;
         private readonly Label serverStateTextLabel;
         private readonly Label serverStateValueLabel;
+        private readonly Label playerCountTextLabel;
+        private readonly Label playerCountValueLabel;
         private readonly Label themeLabel;
         private readonly Label titleLabel;
         private readonly Label subtitleLabel;
@@ -91,14 +104,25 @@ namespace WindroseServerManager.Desktop
         private readonly ThemedListView availableModsListView;
         private readonly ThemedListView installedModsListView;
         private readonly RichTextBox logTextBox;
+        private readonly RichTextBox rconPlayersTextBox;
         private readonly TextBox logFilterTextBox;
         private readonly TextBox backupFolderTextBox;
         private readonly ComboBox modsProviderComboBox;
         private readonly TextBox modsApiKeyTextBox;
         private readonly Button saveModsApiKeyButton;
+        private readonly TextBox rconBindAddressTextBox;
+        private readonly NumericUpDown rconPortNumeric;
+        private readonly TextBox rconPasswordTextBox;
+        private readonly TextBox rconAllowedIpsTextBox;
+        private readonly NumericUpDown rconMaxFailedAttemptsNumeric;
+        private readonly NumericUpDown rconTimeoutNumeric;
+        private readonly CheckBox rconEnableLoggingCheckBox;
+        private readonly CheckBox rconSecureEnabledCheckBox;
+        private readonly TextBox rconAesKeyTextBox;
         private readonly ComboBox curseForgeSearchModeComboBox;
         private readonly TextBox curseForgeSearchTextBox;
         private readonly Label curseForgeStatusLabel;
+        private readonly Label rconStatusLabel;
         private readonly CheckBox scheduledBackupEnabledCheckBox;
         private readonly NumericUpDown scheduledBackupIntervalNumeric;
         private readonly ComboBox scheduledBackupTypeComboBox;
@@ -177,6 +201,9 @@ namespace WindroseServerManager.Desktop
         private string storedCurseForgeApiKey = string.Empty;
         private string storedNexusModsApiKey = string.Empty;
         private GroupBox discoverModsGroup;
+        private DateTime? lastPlayerCountPollUtc;
+        private bool playerCountPollInFlight;
+        private string currentPlayerCountDisplay = "n/a";
 
         private string PreferencesPath
         {
@@ -543,6 +570,7 @@ namespace WindroseServerManager.Desktop
             var manageModsTab = new ThemedTabPage("Manage Mods");
             var backupTab = new ThemedTabPage("Backups");
             var quarterdeckTab = new ThemedTabPage("Quarterdeck");
+            var rconTab = new ThemedTabPage("RCON");
             var operationsTab = new ThemedTabPage("Logbook");
             tabs.TabPages.Add(serverTab);
             tabs.TabPages.Add(worldTab);
@@ -550,6 +578,7 @@ namespace WindroseServerManager.Desktop
             tabs.TabPages.Add(manageModsTab);
             tabs.TabPages.Add(backupTab);
             tabs.TabPages.Add(quarterdeckTab);
+            tabs.TabPages.Add(rconTab);
             tabs.TabPages.Add(operationsTab);
 
             Action<Panel, Control> configureTabScrollRange = delegate(Panel scrollPanel, Control contentRoot)
@@ -1013,6 +1042,131 @@ namespace WindroseServerManager.Desktop
             rebootLayout.Controls.Add(scheduledRebootNextLabel, 0, 2);
             configureTabScrollRange(rebootScrollPanel, rebootGroup);
 
+            var rconScrollPanel = new Panel();
+            rconScrollPanel.Dock = DockStyle.Fill;
+            rconScrollPanel.AutoScroll = true;
+            rconScrollPanel.Margin = new Padding(0);
+            rconTab.Controls.Add(rconScrollPanel);
+
+            var rconLayout = new TableLayoutPanel();
+            rconLayout.Dock = DockStyle.Top;
+            rconLayout.AutoSize = true;
+            rconLayout.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            rconLayout.Margin = new Padding(0);
+            rconLayout.ColumnCount = 1;
+            rconLayout.RowCount = 3;
+            rconLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconScrollPanel.Controls.Add(rconLayout);
+
+            var rconManageGroup = CreateGroupBox("WindroseRCON", 975, 120);
+            rconManageGroup.Dock = DockStyle.Top;
+            rconManageGroup.Margin = new Padding(0);
+            rconLayout.Controls.Add(rconManageGroup, 0, 0);
+
+            var rconManageLayout = new TableLayoutPanel();
+            rconManageLayout.Dock = DockStyle.Fill;
+            rconManageLayout.ColumnCount = 1;
+            rconManageLayout.RowCount = 2;
+            rconManageLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconManageLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconManageGroup.Controls.Add(rconManageLayout);
+
+            var rconButtonsPanel = new FlowLayoutPanel();
+            rconButtonsPanel.Dock = DockStyle.Top;
+            rconButtonsPanel.AutoSize = true;
+            rconButtonsPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            rconButtonsPanel.WrapContents = true;
+            rconManageLayout.Controls.Add(rconButtonsPanel, 0, 0);
+
+            installRconButton = new Button();
+            installRconButton.Text = "Install RCON";
+            installRconButton.Width = 120;
+            installRconButton.Click += delegate { InstallRconFiles(); };
+            rconButtonsPanel.Controls.Add(installRconButton);
+
+            uninstallRconButton = new Button();
+            uninstallRconButton.Text = "Uninstall RCON";
+            uninstallRconButton.Width = 120;
+            uninstallRconButton.Click += delegate { UninstallRconFiles(); };
+            rconButtonsPanel.Controls.Add(uninstallRconButton);
+
+            saveRconSettingsButton = new Button();
+            saveRconSettingsButton.Text = "Save RCON Settings";
+            saveRconSettingsButton.Width = 150;
+            saveRconSettingsButton.Click += delegate { SaveRconSettings(); };
+            rconButtonsPanel.Controls.Add(saveRconSettingsButton);
+
+            testRconButton = new Button();
+            testRconButton.Text = "Test RCON";
+            testRconButton.Width = 110;
+            testRconButton.Click += delegate { TestRconConnection(); };
+            rconButtonsPanel.Controls.Add(testRconButton);
+
+            refreshRconPlayersButton = new Button();
+            refreshRconPlayersButton.Text = "Refresh Players";
+            refreshRconPlayersButton.Width = 130;
+            refreshRconPlayersButton.Click += delegate { RefreshRconPlayers(); };
+            rconButtonsPanel.Controls.Add(refreshRconPlayersButton);
+
+            viewRconLicenseButton = new Button();
+            viewRconLicenseButton.Text = "RCON License";
+            viewRconLicenseButton.Width = 120;
+            viewRconLicenseButton.Click += delegate { ShowRconLicenseDialog(); };
+            rconButtonsPanel.Controls.Add(viewRconLicenseButton);
+
+            rconStatusLabel = new Label();
+            rconStatusLabel.AutoSize = true;
+            rconStatusLabel.Padding = new Padding(4, 4, 4, 4);
+            rconStatusLabel.Text = "RCON status: not detected";
+            rconManageLayout.Controls.Add(rconStatusLabel, 0, 1);
+
+            var rconSettingsGroup = CreateGroupBox("RCON Settings", 975, 240);
+            rconSettingsGroup.Dock = DockStyle.Top;
+            rconSettingsGroup.Margin = new Padding(0, 6, 0, 0);
+            rconLayout.Controls.Add(rconSettingsGroup, 0, 1);
+
+            var rconSettingsGrid = CreateFieldGrid();
+            rconSettingsGroup.Controls.Add(rconSettingsGrid);
+
+            rconBindAddressTextBox = AddTextField(rconSettingsGrid, "BindAddress", 0, 0, 300);
+            rconPortNumeric = AddNumericField(rconSettingsGrid, "Port", 1, 0, 1, 65535, 0, 220);
+            rconPasswordTextBox = AddTextField(rconSettingsGrid, "Password", 2, 0, 260);
+            rconPasswordTextBox.UseSystemPasswordChar = true;
+            rconAllowedIpsTextBox = AddTextField(rconSettingsGrid, "AllowedIPs", 0, 1, 300);
+            rconMaxFailedAttemptsNumeric = AddNumericField(rconSettingsGrid, "MaxFailedAttempts", 1, 1, 1, 50, 0, 220);
+            rconTimeoutNumeric = AddNumericField(rconSettingsGrid, "Timeout", 2, 1, 5, 600, 0, 220);
+            rconEnableLoggingCheckBox = AddCheckField(rconSettingsGrid, "EnableLogging", 0, 2);
+            rconSecureEnabledCheckBox = AddCheckField(rconSettingsGrid, "SecureRCON Enabled", 1, 2);
+            rconAesKeyTextBox = AddTextField(rconSettingsGrid, "AESKey", 2, 2, 340);
+            rconAesKeyTextBox.UseSystemPasswordChar = true;
+            ConfigureResponsiveFieldGrid(rconSettingsGrid, 220,
+                rconBindAddressTextBox.Parent,
+                rconPortNumeric.Parent,
+                rconPasswordTextBox.Parent,
+                rconAllowedIpsTextBox.Parent,
+                rconMaxFailedAttemptsNumeric.Parent,
+                rconTimeoutNumeric.Parent,
+                rconEnableLoggingCheckBox.Parent,
+                rconSecureEnabledCheckBox.Parent,
+                rconAesKeyTextBox.Parent);
+            SyncGroupBoxHeight(rconSettingsGroup, rconSettingsGrid);
+
+            var rconPlayersGroup = CreateGroupBox("Online Players", 975, 240);
+            rconPlayersGroup.Dock = DockStyle.Top;
+            rconPlayersGroup.Margin = new Padding(0, 6, 0, 0);
+            rconLayout.Controls.Add(rconPlayersGroup, 0, 2);
+
+            rconPlayersTextBox = new RichTextBox();
+            rconPlayersTextBox.Dock = DockStyle.Fill;
+            rconPlayersTextBox.ReadOnly = true;
+            rconPlayersTextBox.WordWrap = false;
+            rconPlayersTextBox.Text = "RCON player list will appear here.";
+            rconPlayersGroup.Controls.Add(rconPlayersTextBox);
+
+            configureTabScrollRange(rconScrollPanel, rconLayout);
+
             var worldLayout = CreateFieldGrid();
             worldLayout.MinimumSize = new Size(0, 0);
             worldContainer.Controls.Add(worldLayout, 0, 1);
@@ -1429,6 +1583,18 @@ namespace WindroseServerManager.Desktop
             serverStateValueLabel.Padding = new Padding(0, 4, 0, 0);
             serverStatePanel.Controls.Add(serverStateValueLabel);
 
+            playerCountTextLabel = new Label();
+            playerCountTextLabel.AutoSize = true;
+            playerCountTextLabel.Text = "Players:";
+            playerCountTextLabel.Padding = new Padding(18, 4, 4, 0);
+            serverStatePanel.Controls.Add(playerCountTextLabel);
+
+            playerCountValueLabel = new Label();
+            playerCountValueLabel.AutoSize = true;
+            playerCountValueLabel.Text = currentPlayerCountDisplay;
+            playerCountValueLabel.Padding = new Padding(0, 4, 0, 0);
+            serverStatePanel.Controls.Add(playerCountValueLabel);
+
             provisioningProgressBar = new ProgressBar();
             provisioningProgressBar.Width = 220;
             provisioningProgressBar.Height = 16;
@@ -1628,6 +1794,15 @@ namespace WindroseServerManager.Desktop
             installDirTextBox.Text = DefaultServerDir;
             backupFolderTextBox.Text = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "WindroseBackups");
             themeComboBox.SelectedItem = currentThemeName;
+            rconBindAddressTextBox.Text = "0.0.0.0";
+            rconPortNumeric.Value = 27065;
+            rconPasswordTextBox.Text = "windrose_admin";
+            rconAllowedIpsTextBox.Text = string.Empty;
+            rconMaxFailedAttemptsNumeric.Value = 5;
+            rconTimeoutNumeric.Value = 60;
+            rconEnableLoggingCheckBox.Checked = true;
+            rconSecureEnabledCheckBox.Checked = false;
+            rconAesKeyTextBox.Text = string.Empty;
 
             Load += delegate
             {

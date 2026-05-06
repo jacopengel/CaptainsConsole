@@ -40,8 +40,6 @@ namespace WindroseServerManager.Desktop
                 form.Load += delegate { Log("Main form load"); };
                 form.Shown += delegate { Log("Main form shown"); };
                 form.FormClosed += delegate { Log("Main form closed"); };
-                form.Show();
-                Log("Main form show called");
                 Application.Run(form);
                 Log("Application run completed");
             }
