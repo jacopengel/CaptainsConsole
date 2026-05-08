@@ -8,7 +8,6 @@ $desktopBuildScript = Join-Path $root 'desktop\build-desktop.ps1'
 $issScript = Join-Path $PSScriptRoot 'WindroseCaptainsConsole.iss'
 $assemblyInfoPath = Join-Path $root 'desktop\Properties\AssemblyInfo.cs'
 $shipWheelPng = Join-Path $root 'shipwheel.png'
-$githubRepoBaseUrl = 'https://github.com/jacopengel/CaptainsConsole'
 $githubRawBaseUrl = 'https://raw.githubusercontent.com/jacopengel/CaptainsConsole/main'
 
 if (-not (Test-Path $desktopBuildScript)) {

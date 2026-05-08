@@ -1,6 +1,6 @@
 #define MyAppName "Windrose Captain's Console"
 #ifndef MyAppVersion
-  #define MyAppVersion "0.9.5"
+  #define MyAppVersion "1.0.3.0"
 #endif
 #ifndef MyAppPublisher
   #define MyAppPublisher "Kliphard"
