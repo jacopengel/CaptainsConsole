@@ -28,6 +28,8 @@ namespace WindroseServerManager.Desktop
         public int ScheduledBackupIntervalHours { get; set; }
         public string ScheduledBackupType { get; set; }
         public string NextScheduledBackupUtc { get; set; }
+        public int ScheduledFullBackupRetentionCount { get; set; }
+        public bool ZipFullServerBackups { get; set; }
         public bool ScheduledRebootEnabled { get; set; }
         public bool ScheduledRebootRecurring { get; set; }
         public int ScheduledRebootEveryValue { get; set; }

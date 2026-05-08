@@ -10,6 +10,8 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
@@ -380,6 +382,8 @@ namespace WindroseServerManager.Desktop
             scheduledBackupEnabledCheckBox.Enabled = !provisioningBusy;
             scheduledBackupIntervalNumeric.Enabled = !provisioningBusy;
             scheduledBackupTypeComboBox.Enabled = !provisioningBusy;
+            scheduledBackupRetentionNumeric.Enabled = !provisioningBusy;
+            zipFullBackupsCheckBox.Enabled = !provisioningBusy;
             scheduledRebootEnabledCheckBox.Enabled = !provisioningBusy;
             scheduledRebootDatePicker.Enabled = !provisioningBusy;
             scheduledRebootTimePicker.Enabled = !provisioningBusy;
@@ -404,6 +408,40 @@ namespace WindroseServerManager.Desktop
             removeModButton.Enabled = !provisioningBusy && installedModsListView.SelectedItems.Count > 0;
             curseForgeSearchModeComboBox.Enabled = !provisioningBusy && SelectedModsProviderSupportsSearch();
             curseForgeSearchTextBox.Enabled = !provisioningBusy && SelectedModsProviderSupportsSearch();
+            var hasServerRoot = !string.IsNullOrWhiteSpace(GetCurrentServerRoot());
+            var hasRconSettings = !string.IsNullOrWhiteSpace(GetRconSettingsPath()) && File.Exists(GetRconSettingsPath());
+            var hasInstalledRconDll = !string.IsNullOrWhiteSpace(GetRconVersionDllPath()) && File.Exists(GetRconVersionDllPath());
+            var hasSelectedRconAccountId = !string.IsNullOrWhiteSpace(GetSelectedRconAccountId());
+            browseRconDllButton.Enabled = !provisioningBusy;
+            installRconButton.Enabled = !provisioningBusy && hasServerRoot && !string.IsNullOrWhiteSpace(FindLocalRconVersionDllSource());
+            uninstallRconButton.Enabled = !provisioningBusy && hasServerRoot && (hasInstalledRconDll || hasRconSettings);
+            saveRconSettingsButton.Enabled = !provisioningBusy && hasServerRoot;
+            testRconButton.Enabled = !provisioningBusy && hasRconSettings;
+            refreshRconPlayersButton.Enabled = !provisioningBusy && hasRconSettings;
+            rconHelpButton.Enabled = !provisioningBusy && hasRconSettings;
+            rconInfoButton.Enabled = !provisioningBusy && hasRconSettings;
+            rconShowPlayersButton.Enabled = !provisioningBusy && hasRconSettings;
+            rconPlayerInfoButton.Enabled = !provisioningBusy && hasRconSettings && hasSelectedRconAccountId;
+            rconGetPosButton.Enabled = !provisioningBusy && hasRconSettings && hasSelectedRconAccountId;
+            rconKickButton.Enabled = !provisioningBusy && hasRconSettings && hasSelectedRconAccountId;
+            rconBanButton.Enabled = !provisioningBusy && hasRconSettings && hasSelectedRconAccountId;
+            rconUnbanButton.Enabled = !provisioningBusy && hasRconSettings && hasSelectedRconAccountId;
+            rconBanListButton.Enabled = !provisioningBusy && hasRconSettings;
+            rconDllPathTextBox.Enabled = false;
+            rconSelectedAccountIdTextBox.Enabled = !provisioningBusy && hasRconSettings;
+            rconBanReasonTextBox.Enabled = !provisioningBusy && hasRconSettings;
+            rconBindAddressTextBox.Enabled = !provisioningBusy && hasServerRoot;
+            rconPortNumeric.Enabled = !provisioningBusy && hasServerRoot;
+            rconPasswordTextBox.Enabled = !provisioningBusy && hasServerRoot;
+            rconAllowedIpsTextBox.Enabled = !provisioningBusy && hasServerRoot;
+            rconMaxFailedAttemptsNumeric.Enabled = !provisioningBusy && hasServerRoot;
+            rconTimeoutNumeric.Enabled = !provisioningBusy && hasServerRoot;
+            rconEnableLoggingCheckBox.Enabled = !provisioningBusy && hasServerRoot;
+            rconSecureEnabledCheckBox.Enabled = !provisioningBusy && hasServerRoot;
+            rconAesKeyTextBox.Enabled = !provisioningBusy && hasServerRoot;
+            viewRconLicenseButton.Enabled = true;
+            SchedulePlayerCountRefresh(runningSignal);
+            RefreshRconStatusUi();
         }
 
         private void SetServerStateIndicator(string stateText, Color color)
@@ -556,6 +594,13 @@ namespace WindroseServerManager.Desktop
                     scheduledBackupTypeComboBox.SelectedItem = prefs.ScheduledBackupType;
                 }
 
+                if (prefs.ScheduledFullBackupRetentionCount > 0)
+                {
+                    scheduledBackupRetentionNumeric.Value = Math.Min(100, Math.Max(1, prefs.ScheduledFullBackupRetentionCount));
+                }
+
+                zipFullBackupsCheckBox.Checked = prefs.ZipFullServerBackups;
+
                 if (!string.IsNullOrWhiteSpace(prefs.NextScheduledBackupUtc))
                 {
                     DateTime parsedNext;
@@ -668,6 +713,8 @@ namespace WindroseServerManager.Desktop
                     ScheduledBackupIntervalHours = Decimal.ToInt32(scheduledBackupIntervalNumeric.Value),
                     ScheduledBackupType = scheduledBackupTypeComboBox.SelectedItem != null ? scheduledBackupTypeComboBox.SelectedItem.ToString() : "Captain + World Settings",
                     NextScheduledBackupUtc = nextScheduledBackupUtc.HasValue ? nextScheduledBackupUtc.Value.ToString("o") : string.Empty,
+                    ScheduledFullBackupRetentionCount = Decimal.ToInt32(scheduledBackupRetentionNumeric.Value),
+                    ZipFullServerBackups = zipFullBackupsCheckBox.Checked,
                     ScheduledRebootEnabled = scheduledRebootEnabledCheckBox.Checked,
                     ScheduledRebootRecurring = recurringRebootCheckBox.Checked,
                     ScheduledRebootEveryValue = Decimal.ToInt32(recurringRebootIntervalNumeric.Value),
@@ -957,6 +1004,231 @@ namespace WindroseServerManager.Desktop
 
         private void SchedulePlayerCountRefresh(bool serverLikelyRunning)
         {
+            var hasInstalledRcon = !string.IsNullOrWhiteSpace(GetRconVersionDllPath()) && File.Exists(GetRconVersionDllPath())
+                && !string.IsNullOrWhiteSpace(GetRconSettingsPath()) && File.Exists(GetRconSettingsPath());
+            playerCountTextLabel.Visible = hasInstalledRcon;
+            playerCountValueLabel.Visible = hasInstalledRcon;
+            if (!hasInstalledRcon)
+            {
+                lastKnownPlayerCount = "offline";
+                playerCountValueLabel.Text = lastKnownPlayerCount;
+                return;
+            }
+
+            if (!serverLikelyRunning)
+            {
+                lastKnownPlayerCount = "offline";
+                playerCountValueLabel.Text = lastKnownPlayerCount;
+                return;
+            }
+
+            playerCountValueLabel.Text = lastKnownPlayerCount;
+            if (playerCountRefreshBusy)
+            {
+                return;
+            }
+
+            if (lastPlayerCountRefreshUtc.HasValue && DateTime.UtcNow - lastPlayerCountRefreshUtc.Value < TimeSpan.FromSeconds(5))
+            {
+                return;
+            }
+
+            playerCountRefreshBusy = true;
+            lastPlayerCountRefreshUtc = DateTime.UtcNow;
+            var settings = LoadRconSettingsFromDisk();
+            if (settings == null)
+            {
+                playerCountRefreshBusy = false;
+                lastKnownPlayerCount = "offline";
+                playerCountValueLabel.Text = lastKnownPlayerCount;
+                return;
+            }
+
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                var result = QueryPlayerCountDisplay(settings);
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    lastKnownPlayerCount = string.IsNullOrWhiteSpace(result) ? "unknown" : result;
+                    playerCountValueLabel.Text = lastKnownPlayerCount;
+                    playerCountRefreshBusy = false;
+                });
+            });
+        }
+
+        private void OnSelectedRconPlayerChanged()
+        {
+            if (rconPlayersListView.SelectedItems.Count == 0)
+            {
+                UpdateProcessUi();
+                return;
+            }
+
+            var accountId = rconPlayersListView.SelectedItems[0].SubItems.Count > 1
+                ? rconPlayersListView.SelectedItems[0].SubItems[1].Text
+                : string.Empty;
+            if (!string.IsNullOrWhiteSpace(accountId))
+            {
+                rconSelectedAccountIdTextBox.Text = accountId;
+            }
+
+            UpdateProcessUi();
+        }
+
+        private string GetSelectedRconAccountId()
+        {
+            return (rconSelectedAccountIdTextBox.Text ?? string.Empty).Trim();
+        }
+
+        private void RunNamedRconCommand(string commandName)
+        {
+            try
+            {
+                var fullCommand = BuildRconCommand(commandName);
+                var body = ExecuteRconCommand(BuildRconSettingsFromUi(), fullCommand);
+                rconPlayersTextBox.Text = string.IsNullOrWhiteSpace(body) ? "(No response body)" : body;
+                if (string.Equals(commandName, "showplayers", StringComparison.OrdinalIgnoreCase))
+                {
+                    PopulateRconPlayersList(body);
+                }
+                SetStatus("RCON command completed: " + commandName, false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus("RCON command failed: " + ex.Message, true);
+            }
+        }
+
+        private string BuildRconCommand(string commandName)
+        {
+            var accountId = GetSelectedRconAccountId();
+            var reason = (rconBanReasonTextBox.Text ?? string.Empty).Trim();
+            if (string.Equals(commandName, "kick", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(accountId))
+                {
+                    throw new InvalidOperationException("Select a player or enter an Account ID first.");
+                }
+                return "kick " + accountId;
+            }
+
+            if (string.Equals(commandName, "ban", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(accountId))
+                {
+                    throw new InvalidOperationException("Select a player or enter an Account ID first.");
+                }
+                return string.IsNullOrWhiteSpace(reason)
+                    ? ("ban " + accountId)
+                    : ("ban " + accountId + " " + reason);
+            }
+
+            if (string.Equals(commandName, "unban", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(commandName, "playerinfo", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(commandName, "getpos", StringComparison.OrdinalIgnoreCase))
+            {
+                if (string.IsNullOrWhiteSpace(accountId))
+                {
+                    throw new InvalidOperationException("Select a player or enter an Account ID first.");
+                }
+                return commandName + " " + accountId;
+            }
+
+            return commandName;
+        }
+
+        private void PopulateRconPlayersList(string responseBody)
+        {
+            rconPlayersListView.BeginUpdate();
+            try
+            {
+                rconPlayersListView.Items.Clear();
+                foreach (var line in SplitRconResponseLines(responseBody))
+                {
+                    var parsed = TryParseRconPlayerLine(line);
+                    if (parsed == null)
+                    {
+                        continue;
+                    }
+
+                    var item = new ListViewItem(parsed.Item1);
+                    item.SubItems.Add(parsed.Item2);
+                    item.SubItems.Add(parsed.Item3);
+                    rconPlayersListView.Items.Add(item);
+                }
+            }
+            finally
+            {
+                rconPlayersListView.EndUpdate();
+            }
+        }
+
+        private static IEnumerable<string> SplitRconResponseLines(string responseBody)
+        {
+            return (responseBody ?? string.Empty)
+                .Replace("\r\n", "\n")
+                .Split('\n')
+                .Select(delegate(string line) { return line == null ? string.Empty : line.Trim(); })
+                .Where(delegate(string line) { return !string.IsNullOrWhiteSpace(line); });
+        }
+
+        private static Tuple<string, string, string> TryParseRconPlayerLine(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return null;
+            }
+
+            if (line.StartsWith("Players:", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("Online Players", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("ID", StringComparison.OrdinalIgnoreCase)
+                || line.StartsWith("---", StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            var accountId = ExtractRconAccountId(line);
+            if (string.IsNullOrWhiteSpace(accountId))
+            {
+                return null;
+            }
+
+            var name = line;
+            var accountIndex = line.IndexOf(accountId, StringComparison.OrdinalIgnoreCase);
+            if (accountIndex > 0)
+            {
+                name = line.Substring(0, accountIndex).Trim().Trim('-', ':', '|', '(', ')', '[', ']');
+            }
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = "(Unknown Player)";
+            }
+
+            return Tuple.Create(name, accountId, line);
+        }
+
+        private static string ExtractRconAccountId(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                return string.Empty;
+            }
+
+            var labeledMatch = Regex.Match(line, @"(?i)(account\s*id|accountid|id)\s*[:=]\s*([A-Za-z0-9_\-]+)");
+            if (labeledMatch.Success)
+            {
+                return labeledMatch.Groups[2].Value;
+            }
+
+            var bracketMatch = Regex.Match(line, @"[\[\(]([A-Za-z0-9_\-]{6,})[\]\)]");
+            if (bracketMatch.Success)
+            {
+                return bracketMatch.Groups[1].Value;
+            }
+
+            var tokenMatch = Regex.Match(line, @"\b[A-Za-z0-9_\-]{8,}\b");
+            return tokenMatch.Success ? tokenMatch.Value : string.Empty;
         }
 
         private string GetCurrentServerRoot()
@@ -1080,11 +1352,38 @@ namespace WindroseServerManager.Desktop
 
         private void LoadRconSettingsIntoUi()
         {
+            var settings = LoadRconSettingsFromDisk() ?? CreateDefaultRconSettings();
+            rconBindAddressTextBox.Text = settings.BindAddress;
+            rconPortNumeric.Value = Math.Max(rconPortNumeric.Minimum, Math.Min(rconPortNumeric.Maximum, settings.Port));
+            rconPasswordTextBox.Text = settings.Password ?? string.Empty;
+            rconAllowedIpsTextBox.Text = settings.AllowedIPs ?? string.Empty;
+            rconMaxFailedAttemptsNumeric.Value = Math.Max(rconMaxFailedAttemptsNumeric.Minimum, Math.Min(rconMaxFailedAttemptsNumeric.Maximum, settings.MaxFailedAttempts));
+            rconTimeoutNumeric.Value = Math.Max(rconTimeoutNumeric.Minimum, Math.Min(rconTimeoutNumeric.Maximum, settings.TimeoutSeconds));
+            rconEnableLoggingCheckBox.Checked = settings.EnableLogging;
+            rconSecureEnabledCheckBox.Checked = settings.SecureEnabled;
+            rconAesKeyTextBox.Text = settings.AesKey ?? string.Empty;
         }
 
         private void RefreshRconStatusUi()
         {
-            rconStatusLabel.Text = string.Empty;
+            var serverRoot = GetCurrentServerRoot();
+            if (string.IsNullOrWhiteSpace(serverRoot))
+            {
+                rconStatusLabel.Text = "Load a server root or choose an install directory to manage WindroseRCON.";
+                return;
+            }
+
+            var selectedDll = FindLocalRconVersionDllSource();
+            var installedVersionDllPath = GetRconVersionDllPath();
+            var settingsPath = GetRconSettingsPath();
+            var versionDllState = File.Exists(installedVersionDllPath) ? "Installed" : "Not installed";
+            var settingsState = File.Exists(settingsPath) ? "settings.ini found" : "settings.ini missing";
+            var selectedState = string.IsNullOrWhiteSpace(selectedDll)
+                ? "No local version.dll selected."
+                : "Selected DLL: " + Path.GetFileName(selectedDll);
+            rconStatusLabel.Text = selectedState
+                + "\nTarget Win64: " + GetRconWin64Directory()
+                + "\nInstall state: " + versionDllState + " | " + settingsState;
         }
 
         private static RconSettingsSnapshot CreateDefaultRconSettings()
@@ -1117,6 +1416,37 @@ namespace WindroseServerManager.Desktop
                 SecureEnabled = rconSecureEnabledCheckBox.Checked,
                 AesKey = (rconAesKeyTextBox.Text ?? string.Empty).Trim()
             };
+        }
+
+        private void WriteRconSettingsSnapshot(RconSettingsSnapshot settings)
+        {
+            var settingsPath = GetRconSettingsPath();
+            if (string.IsNullOrWhiteSpace(settingsPath))
+            {
+                throw new InvalidOperationException("Load a server root or choose an install directory first.");
+            }
+
+            var settingsDirectory = Path.GetDirectoryName(settingsPath);
+            if (string.IsNullOrWhiteSpace(settingsDirectory))
+            {
+                throw new InvalidOperationException("Could not resolve the windrosercon settings folder.");
+            }
+
+            Directory.CreateDirectory(settingsDirectory);
+            var lines = new List<string>();
+            lines.Add("[RCON]");
+            lines.Add("BindAddress=" + (settings.BindAddress ?? string.Empty));
+            lines.Add("Port=" + settings.Port);
+            lines.Add("Password=" + (settings.Password ?? string.Empty));
+            lines.Add("AllowedIPs=" + (settings.AllowedIPs ?? string.Empty));
+            lines.Add("MaxFailedAttempts=" + settings.MaxFailedAttempts);
+            lines.Add("Timeout=" + settings.TimeoutSeconds);
+            lines.Add("EnableLogging=" + (settings.EnableLogging ? "true" : "false"));
+            lines.Add(string.Empty);
+            lines.Add("[SecureRCON]");
+            lines.Add("Enabled=" + (settings.SecureEnabled ? "true" : "false"));
+            lines.Add("AESKey=" + (settings.AesKey ?? string.Empty));
+            File.WriteAllLines(settingsPath, lines.ToArray());
         }
 
         private static string QueryPlayerCountDisplay(RconSettingsSnapshot settings)

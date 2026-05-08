@@ -73,10 +73,20 @@ namespace WindroseServerManager.Desktop
         private readonly Button removeModButton;
         private readonly Button installRconButton;
         private readonly Button uninstallRconButton;
+        private readonly Button browseRconDllButton;
         private readonly Button saveRconSettingsButton;
         private readonly Button testRconButton;
         private readonly Button refreshRconPlayersButton;
         private readonly Button viewRconLicenseButton;
+        private readonly Button rconHelpButton;
+        private readonly Button rconInfoButton;
+        private readonly Button rconShowPlayersButton;
+        private readonly Button rconPlayerInfoButton;
+        private readonly Button rconGetPosButton;
+        private readonly Button rconKickButton;
+        private readonly Button rconBanButton;
+        private readonly Button rconUnbanButton;
+        private readonly Button rconBanListButton;
         private readonly Button setActiveWorldButton;
         private readonly Button toggleWarningsButton;
         private readonly Label statusLabel;
@@ -100,10 +110,14 @@ namespace WindroseServerManager.Desktop
         private readonly Button saveWorldTabButton;
         private readonly ThemedListView availableModsListView;
         private readonly ThemedListView installedModsListView;
+        private readonly ThemedListView rconPlayersListView;
         private readonly RichTextBox logTextBox;
         private readonly RichTextBox rconPlayersTextBox;
         private readonly TextBox logFilterTextBox;
         private readonly TextBox backupFolderTextBox;
+        private readonly TextBox rconDllPathTextBox;
+        private readonly TextBox rconSelectedAccountIdTextBox;
+        private readonly TextBox rconBanReasonTextBox;
         private readonly ComboBox modsProviderComboBox;
         private readonly TextBox modsApiKeyTextBox;
         private readonly Button saveModsApiKeyButton;
@@ -121,7 +135,9 @@ namespace WindroseServerManager.Desktop
         private readonly Label curseForgeStatusLabel;
         private readonly Label rconStatusLabel;
         private readonly CheckBox scheduledBackupEnabledCheckBox;
+        private readonly CheckBox zipFullBackupsCheckBox;
         private readonly NumericUpDown scheduledBackupIntervalNumeric;
+        private readonly NumericUpDown scheduledBackupRetentionNumeric;
         private readonly ComboBox scheduledBackupTypeComboBox;
         private readonly Label scheduledBackupNextLabel;
         private readonly Timer scheduledBackupTimer;
@@ -193,6 +209,9 @@ namespace WindroseServerManager.Desktop
         private ThemeColors currentThemeColors;
         private DateTime? nextScheduledBackupUtc;
         private DateTime? nextScheduledRebootUtc;
+        private DateTime? lastPlayerCountRefreshUtc;
+        private string lastKnownPlayerCount = "offline";
+        private bool playerCountRefreshBusy;
         private readonly Panel topHeaderPanel;
         private string selectedModsProvider = ModProviderCurseForge;
         private string storedCurseForgeApiKey = string.Empty;
@@ -562,6 +581,7 @@ namespace WindroseServerManager.Desktop
             var worldTab = new ThemedTabPage("World");
             var modsTab = new ThemedTabPage("Mods");
             var manageModsTab = new ThemedTabPage("Manage Mods");
+            var rconTab = new ThemedTabPage("RCON");
             var backupTab = new ThemedTabPage("Backups");
             var quarterdeckTab = new ThemedTabPage("Quarterdeck");
             var operationsTab = new ThemedTabPage("Logbook");
@@ -569,6 +589,7 @@ namespace WindroseServerManager.Desktop
             tabs.TabPages.Add(worldTab);
             tabs.TabPages.Add(modsTab);
             tabs.TabPages.Add(manageModsTab);
+            tabs.TabPages.Add(rconTab);
             tabs.TabPages.Add(backupTab);
             tabs.TabPages.Add(quarterdeckTab);
             tabs.TabPages.Add(operationsTab);
@@ -860,7 +881,8 @@ namespace WindroseServerManager.Desktop
                 "\u2022 Use full backup before major updates or mod changes.\n" +
                 "\u2022 Captain settings backup copies ServerDescription.json.\n" +
                 "\u2022 World settings backup copies selected World's WorldDescription.json.\n" +
-                "\u2022 Restore Full Server copies a backup folder over the current server install.\n" +
+                "\u2022 Full server backups can be saved as .zip archives to reduce disk usage.\n" +
+                "\u2022 Restore Full Server supports both zipped backups and older folder-style backups.\n" +
                 "\u2022 Restore Captain/World Settings overwrites the live JSON file after a safety .bak copy.";
             backupLayout.Controls.Add(backupNotes, 0, 2);
             configureTabScrollRange(backupScrollPanel, backupGroup);
@@ -886,6 +908,7 @@ namespace WindroseServerManager.Desktop
             scheduledLayout.Controls.Add(scheduledControlsPanel, 0, 0);
 
             scheduledBackupEnabledCheckBox = new CheckBox();
+            zipFullBackupsCheckBox = new CheckBox();
             scheduledBackupEnabledCheckBox.Text = "Enable Scheduled Backups";
             scheduledBackupEnabledCheckBox.AutoSize = true;
             scheduledBackupEnabledCheckBox.Padding = new Padding(0, 5, 12, 0);
@@ -906,6 +929,13 @@ namespace WindroseServerManager.Desktop
             scheduledBackupIntervalNumeric.ValueChanged += delegate { ApplyScheduledBackupSettings(); };
             scheduledControlsPanel.Controls.Add(scheduledBackupIntervalNumeric);
 
+            scheduledBackupRetentionNumeric = new NumericUpDown();
+            scheduledBackupRetentionNumeric.Minimum = 1;
+            scheduledBackupRetentionNumeric.Maximum = 100;
+            scheduledBackupRetentionNumeric.Value = 7;
+            scheduledBackupRetentionNumeric.Width = 60;
+            scheduledBackupRetentionNumeric.ValueChanged += delegate { ApplyScheduledBackupSettings(); };
+
             var scheduledIntervalSuffixLabel = new Label();
             scheduledIntervalSuffixLabel.Text = "hours";
             scheduledIntervalSuffixLabel.AutoSize = true;
@@ -923,7 +953,29 @@ namespace WindroseServerManager.Desktop
             scheduledBackupTypeComboBox.Width = 220;
             scheduledBackupTypeComboBox.Items.AddRange(new object[] { "Captain + World Settings", "Full Server" });
             scheduledBackupTypeComboBox.SelectedIndex = 0;
+            scheduledBackupTypeComboBox.SelectedIndexChanged += delegate { ApplyScheduledBackupSettings(); };
             scheduledControlsPanel.Controls.Add(scheduledBackupTypeComboBox);
+
+            var scheduledRetentionLabel = new Label();
+            scheduledRetentionLabel.Text = "Keep last:";
+            scheduledRetentionLabel.AutoSize = true;
+            scheduledRetentionLabel.Padding = new Padding(12, 8, 4, 0);
+            scheduledControlsPanel.Controls.Add(scheduledRetentionLabel);
+
+            scheduledControlsPanel.Controls.Add(scheduledBackupRetentionNumeric);
+
+            var scheduledRetentionSuffixLabel = new Label();
+            scheduledRetentionSuffixLabel.Text = "full backups";
+            scheduledRetentionSuffixLabel.AutoSize = true;
+            scheduledRetentionSuffixLabel.Padding = new Padding(4, 8, 12, 0);
+            scheduledControlsPanel.Controls.Add(scheduledRetentionSuffixLabel);
+
+            zipFullBackupsCheckBox.Text = "Zip Full Server Backups";
+            zipFullBackupsCheckBox.AutoSize = true;
+            zipFullBackupsCheckBox.Padding = new Padding(0, 5, 0, 0);
+            zipFullBackupsCheckBox.Checked = true;
+            zipFullBackupsCheckBox.CheckedChanged += delegate { UpdateScheduledBackupNextLabel(); SavePreferences(); };
+            scheduledControlsPanel.Controls.Add(zipFullBackupsCheckBox);
 
             scheduledBackupNextLabel = new Label();
             scheduledBackupNextLabel.AutoSize = true;
@@ -1036,11 +1088,24 @@ namespace WindroseServerManager.Desktop
 
             installRconButton = new Button();
             uninstallRconButton = new Button();
+            browseRconDllButton = new Button();
             saveRconSettingsButton = new Button();
             testRconButton = new Button();
             refreshRconPlayersButton = new Button();
             viewRconLicenseButton = new Button();
+            rconHelpButton = new Button();
+            rconInfoButton = new Button();
+            rconShowPlayersButton = new Button();
+            rconPlayerInfoButton = new Button();
+            rconGetPosButton = new Button();
+            rconKickButton = new Button();
+            rconBanButton = new Button();
+            rconUnbanButton = new Button();
+            rconBanListButton = new Button();
             rconStatusLabel = new Label();
+            rconDllPathTextBox = new TextBox();
+            rconSelectedAccountIdTextBox = new TextBox();
+            rconBanReasonTextBox = new TextBox();
             rconBindAddressTextBox = new TextBox();
             rconPortNumeric = new NumericUpDown();
             rconPasswordTextBox = new TextBox();
@@ -1051,6 +1116,7 @@ namespace WindroseServerManager.Desktop
             rconSecureEnabledCheckBox = new CheckBox();
             rconAesKeyTextBox = new TextBox();
             rconPlayersTextBox = new RichTextBox();
+            rconPlayersListView = new ThemedListView();
 
             var worldLayout = CreateFieldGrid();
             worldLayout.MinimumSize = new Size(0, 0);
@@ -1321,6 +1387,311 @@ namespace WindroseServerManager.Desktop
             configureTabScrollRange(manageModsScrollPanel, manageGroup);
             configureTabScrollRange(modsScrollPanel, modsGroup);
 
+            var rconScrollPanel = new Panel();
+            rconScrollPanel.Dock = DockStyle.Fill;
+            rconScrollPanel.AutoScroll = true;
+            rconScrollPanel.Margin = new Padding(0);
+            rconTab.Controls.Add(rconScrollPanel);
+
+            var rconRootLayout = new TableLayoutPanel();
+            rconRootLayout.Dock = DockStyle.Top;
+            rconRootLayout.AutoSize = true;
+            rconRootLayout.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            rconRootLayout.Margin = new Padding(0);
+            rconRootLayout.ColumnCount = 1;
+            rconRootLayout.RowCount = 4;
+            rconRootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconRootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconRootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconRootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconScrollPanel.Controls.Add(rconRootLayout);
+
+            var rconInstallGroup = CreateGroupBox("Install WindroseRCON", 975, 190);
+            rconInstallGroup.Dock = DockStyle.Top;
+            rconInstallGroup.Margin = new Padding(0);
+            rconRootLayout.Controls.Add(rconInstallGroup, 0, 0);
+
+            var rconInstallLayout = new TableLayoutPanel();
+            rconInstallLayout.Dock = DockStyle.Fill;
+            rconInstallLayout.ColumnCount = 1;
+            rconInstallLayout.RowCount = 4;
+            rconInstallLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconInstallLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconInstallLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconInstallLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconInstallGroup.Controls.Add(rconInstallLayout);
+
+            var rconIntroLabel = new Label();
+            rconIntroLabel.AutoSize = true;
+            rconIntroLabel.MaximumSize = new Size(920, 0);
+            rconIntroLabel.Text = "Captain's Console does not bundle or auto-download WindroseRCON. Download the release yourself, select the local version.dll here, and the app will copy it into the loaded server's Win64 folder.";
+            rconInstallLayout.Controls.Add(rconIntroLabel, 0, 0);
+
+            var rconDllPanel = new FlowLayoutPanel();
+            rconDllPanel.Dock = DockStyle.Top;
+            rconDllPanel.AutoSize = true;
+            rconDllPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            rconDllPanel.WrapContents = true;
+            rconInstallLayout.Controls.Add(rconDllPanel, 0, 1);
+
+            var rconDllLabel = new Label();
+            rconDllLabel.Text = "Local version.dll:";
+            rconDllLabel.AutoSize = true;
+            rconDllLabel.Padding = new Padding(0, 8, 4, 0);
+            rconDllPanel.Controls.Add(rconDllLabel);
+
+            rconDllPathTextBox.Width = 500;
+            rconDllPathTextBox.ReadOnly = true;
+            rconDllPanel.Controls.Add(rconDllPathTextBox);
+
+            browseRconDllButton.Text = "Browse DLL";
+            browseRconDllButton.Width = 110;
+            browseRconDllButton.Click += delegate { BrowseForRconVersionDll(); };
+            rconDllPanel.Controls.Add(browseRconDllButton);
+
+            var rconInstallButtonsPanel = new FlowLayoutPanel();
+            rconInstallButtonsPanel.Dock = DockStyle.Top;
+            rconInstallButtonsPanel.AutoSize = true;
+            rconInstallButtonsPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            rconInstallButtonsPanel.WrapContents = true;
+            rconInstallLayout.Controls.Add(rconInstallButtonsPanel, 0, 2);
+
+            installRconButton.Text = "Install Selected DLL";
+            installRconButton.Width = 150;
+            installRconButton.Click += delegate { InstallRconFiles(); };
+            rconInstallButtonsPanel.Controls.Add(installRconButton);
+
+            uninstallRconButton.Text = "Uninstall RCON";
+            uninstallRconButton.Width = 120;
+            uninstallRconButton.Click += delegate { UninstallRconFiles(); };
+            rconInstallButtonsPanel.Controls.Add(uninstallRconButton);
+
+            viewRconLicenseButton.Text = "Open Download Page";
+            viewRconLicenseButton.Width = 145;
+            viewRconLicenseButton.Click += delegate { OpenRconDownloadPage(); };
+            rconInstallButtonsPanel.Controls.Add(viewRconLicenseButton);
+
+            rconStatusLabel.AutoSize = true;
+            rconStatusLabel.MaximumSize = new Size(920, 0);
+            rconStatusLabel.Text = string.Empty;
+            rconInstallLayout.Controls.Add(rconStatusLabel, 0, 3);
+            SyncGroupBoxHeight(rconInstallGroup, rconInstallLayout);
+
+            var rconSettingsGroup = CreateGroupBox("RCON Settings", 975, 250);
+            rconSettingsGroup.Dock = DockStyle.Top;
+            rconSettingsGroup.Margin = new Padding(0, 12, 0, 0);
+            rconRootLayout.Controls.Add(rconSettingsGroup, 0, 1);
+
+            var rconSettingsContainer = new TableLayoutPanel();
+            rconSettingsContainer.Dock = DockStyle.Top;
+            rconSettingsContainer.AutoSize = true;
+            rconSettingsContainer.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            rconSettingsContainer.ColumnCount = 1;
+            rconSettingsContainer.RowCount = 2;
+            rconSettingsContainer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconSettingsContainer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconSettingsGroup.Controls.Add(rconSettingsContainer);
+
+            var rconSettingsLayout = CreateFieldGrid();
+            rconSettingsLayout.MinimumSize = new Size(0, 0);
+            rconSettingsContainer.Controls.Add(rconSettingsLayout, 0, 0);
+
+            AddLabeledControl(rconSettingsLayout, "Bind Address", rconBindAddressTextBox, 0, 0, 220);
+            AddLabeledControl(rconSettingsLayout, "Port", rconPortNumeric, 1, 0, 140);
+            AddLabeledControl(rconSettingsLayout, "Password", rconPasswordTextBox, 2, 0, 220);
+            AddLabeledControl(rconSettingsLayout, "Allowed IPs", rconAllowedIpsTextBox, 3, 0, 220);
+            AddLabeledControl(rconSettingsLayout, "Max Failed Attempts", rconMaxFailedAttemptsNumeric, 0, 1, 140);
+            AddLabeledControl(rconSettingsLayout, "Timeout Seconds", rconTimeoutNumeric, 1, 1, 140);
+            AddLabeledControl(rconSettingsLayout, "AES Key", rconAesKeyTextBox, 2, 1, 220);
+            rconEnableLoggingCheckBox.Text = "Enable Logging";
+            rconEnableLoggingCheckBox.AutoSize = true;
+            AddLabeledControl(rconSettingsLayout, "Options", rconEnableLoggingCheckBox, 3, 1, 180);
+            rconSecureEnabledCheckBox.Text = "Enable Secure RCON";
+            rconSecureEnabledCheckBox.AutoSize = true;
+            AddLabeledControl(rconSettingsLayout, "Secure", rconSecureEnabledCheckBox, 0, 2, 180);
+
+            rconPortNumeric.Minimum = 1;
+            rconPortNumeric.Maximum = 65535;
+            rconPortNumeric.Width = 140;
+            rconMaxFailedAttemptsNumeric.Minimum = 1;
+            rconMaxFailedAttemptsNumeric.Maximum = 100;
+            rconMaxFailedAttemptsNumeric.Width = 140;
+            rconTimeoutNumeric.Minimum = 5;
+            rconTimeoutNumeric.Maximum = 600;
+            rconTimeoutNumeric.Width = 140;
+            rconPasswordTextBox.UseSystemPasswordChar = true;
+            rconAesKeyTextBox.UseSystemPasswordChar = true;
+
+            ConfigureResponsiveFieldGrid(rconSettingsLayout, 220,
+                rconBindAddressTextBox.Parent,
+                rconPortNumeric.Parent,
+                rconPasswordTextBox.Parent,
+                rconAllowedIpsTextBox.Parent,
+                rconMaxFailedAttemptsNumeric.Parent,
+                rconTimeoutNumeric.Parent,
+                rconAesKeyTextBox.Parent,
+                rconEnableLoggingCheckBox.Parent,
+                rconSecureEnabledCheckBox.Parent);
+
+            var rconSettingsButtonsPanel = new FlowLayoutPanel();
+            rconSettingsButtonsPanel.Dock = DockStyle.Top;
+            rconSettingsButtonsPanel.AutoSize = true;
+            rconSettingsButtonsPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            rconSettingsButtonsPanel.WrapContents = true;
+            rconSettingsButtonsPanel.Padding = new Padding(0, 8, 0, 0);
+            rconSettingsContainer.Controls.Add(rconSettingsButtonsPanel, 0, 1);
+
+            saveRconSettingsButton.Text = "Save Settings";
+            saveRconSettingsButton.Width = 120;
+            saveRconSettingsButton.Click += delegate { SaveRconSettings(); };
+            rconSettingsButtonsPanel.Controls.Add(saveRconSettingsButton);
+
+            testRconButton.Text = "Test RCON";
+            testRconButton.Width = 110;
+            testRconButton.Click += delegate { TestRconConnection(); };
+            rconSettingsButtonsPanel.Controls.Add(testRconButton);
+
+            refreshRconPlayersButton.Text = "Refresh Players";
+            refreshRconPlayersButton.Width = 130;
+            refreshRconPlayersButton.Click += delegate { RefreshRconPlayers(); };
+            rconSettingsButtonsPanel.Controls.Add(refreshRconPlayersButton);
+            SyncGroupBoxHeight(rconSettingsGroup, rconSettingsContainer);
+
+            var rconCommandsGroup = CreateGroupBox("RCON Commands", 975, 240);
+            rconCommandsGroup.Dock = DockStyle.Top;
+            rconCommandsGroup.Margin = new Padding(0, 12, 0, 0);
+            rconRootLayout.Controls.Add(rconCommandsGroup, 0, 2);
+
+            var rconCommandsLayout = new TableLayoutPanel();
+            rconCommandsLayout.Dock = DockStyle.Top;
+            rconCommandsLayout.AutoSize = true;
+            rconCommandsLayout.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            rconCommandsLayout.ColumnCount = 1;
+            rconCommandsLayout.RowCount = 3;
+            rconCommandsLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconCommandsLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconCommandsLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            rconCommandsGroup.Controls.Add(rconCommandsLayout);
+
+            var rconTargetPanel = new FlowLayoutPanel();
+            rconTargetPanel.Dock = DockStyle.Top;
+            rconTargetPanel.AutoSize = true;
+            rconTargetPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            rconTargetPanel.WrapContents = true;
+            rconCommandsLayout.Controls.Add(rconTargetPanel, 0, 0);
+
+            var accountIdLabel = new Label();
+            accountIdLabel.Text = "Account ID:";
+            accountIdLabel.AutoSize = true;
+            accountIdLabel.Padding = new Padding(0, 8, 4, 0);
+            rconTargetPanel.Controls.Add(accountIdLabel);
+
+            rconSelectedAccountIdTextBox.Width = 220;
+            rconTargetPanel.Controls.Add(rconSelectedAccountIdTextBox);
+
+            var reasonLabel = new Label();
+            reasonLabel.Text = "Ban Reason:";
+            reasonLabel.AutoSize = true;
+            reasonLabel.Padding = new Padding(10, 8, 4, 0);
+            rconTargetPanel.Controls.Add(reasonLabel);
+
+            rconBanReasonTextBox.Width = 260;
+            rconTargetPanel.Controls.Add(rconBanReasonTextBox);
+
+            var rconReadButtonsPanel = new FlowLayoutPanel();
+            rconReadButtonsPanel.Dock = DockStyle.Top;
+            rconReadButtonsPanel.AutoSize = true;
+            rconReadButtonsPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            rconReadButtonsPanel.WrapContents = true;
+            rconCommandsLayout.Controls.Add(rconReadButtonsPanel, 0, 1);
+
+            rconHelpButton.Text = "Help";
+            rconHelpButton.Width = 90;
+            rconHelpButton.Click += delegate { RunNamedRconCommand("help"); };
+            rconReadButtonsPanel.Controls.Add(rconHelpButton);
+
+            rconInfoButton.Text = "Info";
+            rconInfoButton.Width = 90;
+            rconInfoButton.Click += delegate { RunNamedRconCommand("info"); };
+            rconReadButtonsPanel.Controls.Add(rconInfoButton);
+
+            rconShowPlayersButton.Text = "Show Players";
+            rconShowPlayersButton.Width = 110;
+            rconShowPlayersButton.Click += delegate { RefreshRconPlayers(); };
+            rconReadButtonsPanel.Controls.Add(rconShowPlayersButton);
+
+            rconPlayerInfoButton.Text = "Player Info";
+            rconPlayerInfoButton.Width = 110;
+            rconPlayerInfoButton.Click += delegate { RunNamedRconCommand("playerinfo"); };
+            rconReadButtonsPanel.Controls.Add(rconPlayerInfoButton);
+
+            rconGetPosButton.Text = "Get Position";
+            rconGetPosButton.Width = 110;
+            rconGetPosButton.Click += delegate { RunNamedRconCommand("getpos"); };
+            rconReadButtonsPanel.Controls.Add(rconGetPosButton);
+
+            rconBanListButton.Text = "Ban List";
+            rconBanListButton.Width = 100;
+            rconBanListButton.Click += delegate { RunNamedRconCommand("banlist"); };
+            rconReadButtonsPanel.Controls.Add(rconBanListButton);
+
+            var rconWriteButtonsPanel = new FlowLayoutPanel();
+            rconWriteButtonsPanel.Dock = DockStyle.Top;
+            rconWriteButtonsPanel.AutoSize = true;
+            rconWriteButtonsPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            rconWriteButtonsPanel.WrapContents = true;
+            rconCommandsLayout.Controls.Add(rconWriteButtonsPanel, 0, 2);
+
+            rconKickButton.Text = "Kick Player";
+            rconKickButton.Width = 110;
+            rconKickButton.Click += delegate { RunNamedRconCommand("kick"); };
+            rconWriteButtonsPanel.Controls.Add(rconKickButton);
+
+            rconBanButton.Text = "Ban Player";
+            rconBanButton.Width = 110;
+            rconBanButton.Click += delegate { RunNamedRconCommand("ban"); };
+            rconWriteButtonsPanel.Controls.Add(rconBanButton);
+
+            rconUnbanButton.Text = "Unban Player";
+            rconUnbanButton.Width = 120;
+            rconUnbanButton.Click += delegate { RunNamedRconCommand("unban"); };
+            rconWriteButtonsPanel.Controls.Add(rconUnbanButton);
+            SyncGroupBoxHeight(rconCommandsGroup, rconCommandsLayout);
+
+            var rconPlayersGroup = CreateGroupBox("Online Players", 975, 220);
+            rconPlayersGroup.Dock = DockStyle.Top;
+            rconPlayersGroup.Margin = new Padding(0, 12, 0, 0);
+            rconRootLayout.Controls.Add(rconPlayersGroup, 0, 3);
+
+            var rconPlayersLayout = new TableLayoutPanel();
+            rconPlayersLayout.Dock = DockStyle.Fill;
+            rconPlayersLayout.ColumnCount = 1;
+            rconPlayersLayout.RowCount = 2;
+            rconPlayersLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 45F));
+            rconPlayersLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 55F));
+            rconPlayersGroup.Controls.Add(rconPlayersLayout);
+
+            rconPlayersListView.Dock = DockStyle.Fill;
+            rconPlayersListView.View = View.Details;
+            rconPlayersListView.FullRowSelect = true;
+            rconPlayersListView.HideSelection = false;
+            rconPlayersListView.MultiSelect = false;
+            rconPlayersListView.GridLines = true;
+            rconPlayersListView.Columns.Add("Player", 260);
+            rconPlayersListView.Columns.Add("Account ID", 220);
+            rconPlayersListView.Columns.Add("Details", 360);
+            rconPlayersListView.SelectedIndexChanged += delegate { OnSelectedRconPlayerChanged(); };
+            rconPlayersLayout.Controls.Add(rconPlayersListView, 0, 0);
+
+            rconPlayersTextBox.Dock = DockStyle.Fill;
+            rconPlayersTextBox.ReadOnly = true;
+            rconPlayersTextBox.WordWrap = false;
+            rconPlayersTextBox.DetectUrls = false;
+            rconPlayersTextBox.Text = "Install WindroseRCON, save your settings, then use Test RCON or Refresh Players.";
+            rconPlayersLayout.Controls.Add(rconPlayersTextBox, 0, 1);
+
+            configureTabScrollRange(rconScrollPanel, rconRootLayout);
+
             var steamCmdPanel = new FlowLayoutPanel();
             steamCmdPanel.Dock = DockStyle.Fill;
             steamCmdPanel.WrapContents = false;
@@ -1470,11 +1841,18 @@ namespace WindroseServerManager.Desktop
 
             playerCountTextLabel = new Label();
             playerCountTextLabel.AutoSize = true;
+            playerCountTextLabel.Text = "Players:";
+            playerCountTextLabel.Padding = new Padding(0, 4, 4, 0);
+            playerCountTextLabel.Margin = new Padding(24, 0, 0, 0);
             playerCountTextLabel.Visible = false;
+            serverMetaPanel.Controls.Add(playerCountTextLabel);
 
             playerCountValueLabel = new Label();
             playerCountValueLabel.AutoSize = true;
+            playerCountValueLabel.Text = "offline";
+            playerCountValueLabel.Padding = new Padding(0, 4, 0, 0);
             playerCountValueLabel.Visible = false;
+            serverMetaPanel.Controls.Add(playerCountValueLabel);
 
             provisioningProgressBar = new ProgressBar();
             provisioningProgressBar.Width = 220;
@@ -1680,6 +2058,8 @@ namespace WindroseServerManager.Desktop
             {
                 LoadPreferencesIntoUi();
                 RefreshModsProviderUi();
+                LoadRconSettingsIntoUi();
+                RefreshRconStatusUi();
                 TryAutoLoadLastServer();
                 ApplyNativeControlTheme();
             };

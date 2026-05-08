@@ -43,6 +43,8 @@ namespace WindroseServerManager.Desktop
                 helpToolTip.SetToolTip(scheduledBackupEnabledCheckBox, "Enable automatic scheduled backups on a repeating interval. The app must be running for scheduled backups to fire.");
                 helpToolTip.SetToolTip(scheduledBackupIntervalNumeric, "How often to run the scheduled backup, in hours. Minimum 1 hour, maximum 720 hours (30 days).");
                 helpToolTip.SetToolTip(scheduledBackupTypeComboBox, "What to back up when the schedule fires: Captain and World settings JSON files, or a full copy of the entire server folder.");
+                helpToolTip.SetToolTip(scheduledBackupRetentionNumeric, "When Scheduled Backup type is Full Server, keep only this many most recent full backups and prune older ones automatically.");
+                helpToolTip.SetToolTip(zipFullBackupsCheckBox, "When enabled, full server backups are compressed into .zip archives to save disk space.");
                 helpToolTip.SetToolTip(scheduledBackupNextLabel, "Shows when the next scheduled backup will run.");
             helpToolTip.SetToolTip(scheduledRebootEnabledCheckBox, "Enable automatic server reboots at the selected date/time. Recurring mode keeps repeating on your chosen interval.");
                 helpToolTip.SetToolTip(scheduledRebootDatePicker, "Select the first reboot date.");
@@ -72,6 +74,25 @@ namespace WindroseServerManager.Desktop
             helpToolTip.SetToolTip(openCurseForgeButton, "Open the selected provider's Windrose page in your browser.");
             helpToolTip.SetToolTip(openModsFolderButton, "Open the community-convention ~mods folder for the loaded server root.");
             helpToolTip.SetToolTip(importModFolderButton, "Copy an extracted mod folder into the current ~mods folder.");
+            helpToolTip.SetToolTip(rconDllPathTextBox, "Local WindroseRCON version.dll selected for manual installation into the loaded server.");
+            helpToolTip.SetToolTip(browseRconDllButton, "Choose a local WindroseRCON version.dll file that you downloaded yourself.");
+            helpToolTip.SetToolTip(installRconButton, "Copy the selected local version.dll into the loaded server's R5\\\\Binaries\\\\Win64 folder and create default settings if needed.");
+            helpToolTip.SetToolTip(uninstallRconButton, "Remove version.dll from the loaded server and move the windrosercon settings folder to trash.");
+            helpToolTip.SetToolTip(saveRconSettingsButton, "Write the current RCON settings UI into windrosercon\\\\settings.ini for the loaded server.");
+            helpToolTip.SetToolTip(testRconButton, "Try the RCON info command using the current settings in the UI.");
+            helpToolTip.SetToolTip(refreshRconPlayersButton, "Query the running RCON server for its online player list using showplayers.");
+            helpToolTip.SetToolTip(viewRconLicenseButton, "Open the WindroseRCON releases page so you can download version.dll yourself.");
+            helpToolTip.SetToolTip(rconSelectedAccountIdTextBox, "Account ID used by moderation and player-specific RCON commands. Selecting a player fills this automatically when possible.");
+            helpToolTip.SetToolTip(rconBanReasonTextBox, "Optional ban reason sent with the ban command.");
+            helpToolTip.SetToolTip(rconHelpButton, "Run the RCON help command.");
+            helpToolTip.SetToolTip(rconInfoButton, "Run the RCON info command.");
+            helpToolTip.SetToolTip(rconShowPlayersButton, "Run showplayers and refresh the parsed online player list.");
+            helpToolTip.SetToolTip(rconPlayerInfoButton, "Run playerinfo for the selected or manually entered Account ID.");
+            helpToolTip.SetToolTip(rconGetPosButton, "Run getpos for the selected or manually entered Account ID.");
+            helpToolTip.SetToolTip(rconKickButton, "Kick the selected or manually entered Account ID.");
+            helpToolTip.SetToolTip(rconBanButton, "Ban the selected or manually entered Account ID, with the optional reason.");
+            helpToolTip.SetToolTip(rconUnbanButton, "Unban the selected or manually entered Account ID.");
+            helpToolTip.SetToolTip(rconBanListButton, "Show the current RCON ban list.");
             helpToolTip.SetToolTip(curseForgeSearchModeComboBox, "Keyword searches platform listings. Mod ID fetches one exact item when supported by the selected provider.");
             helpToolTip.SetToolTip(curseForgeSearchTextBox, "Keyword mode: optional text filter. Mod ID mode: enter numeric mod ID when supported.");
             helpToolTip.SetToolTip(searchCurseForgeButton, "Search the selected mod provider.");
@@ -109,6 +130,8 @@ namespace WindroseServerManager.Desktop
             helpToolTip.SetToolTip(logTextBox, "Live output captured from the server process launched by this app.");
             helpToolTip.SetToolTip(availableModsListView, "Available mods found from the selected provider search.");
             helpToolTip.SetToolTip(installedModsListView, "Mods currently detected under ~mods.");
+            helpToolTip.SetToolTip(rconPlayersListView, "Parsed online players from the latest showplayers response.");
+            helpToolTip.SetToolTip(rconPlayersTextBox, "Latest RCON info or showplayers response.");
             helpToolTip.SetToolTip(saveServerTabButton, "Save server settings from the Captain tab.");
             helpToolTip.SetToolTip(saveWorldTabButton, "Save world settings from the World tab.");
         }
@@ -180,7 +203,7 @@ namespace WindroseServerManager.Desktop
             try
             {
                 var backupResult = CreateFullServerBackup(rootPath);
-                AppendLog("Created full server backup: " + backupResult.TargetFolder);
+                AppendLog("Created full server backup: " + backupResult.TargetPath);
                 if (backupResult.SkippedFileCount > 0)
                 {
                     SetStatus("Full server backup created with " + backupResult.SkippedFileCount + " skipped live files. Check Live Log.", false);
@@ -268,57 +291,124 @@ namespace WindroseServerManager.Desktop
                 return;
             }
 
-            using (var dialog = new FolderBrowserDialog())
+            var sourceChoice = MessageBox.Show(
+                this,
+                "Restore from a zipped full backup?\n\nYes = choose a .zip backup archive\nNo = choose an older folder-style backup",
+                AppTitle,
+                MessageBoxButtons.YesNoCancel,
+                MessageBoxIcon.Question,
+                MessageBoxDefaultButton.Button1);
+
+            if (sourceChoice == DialogResult.Cancel)
             {
-                var backupFolder = backupFolderTextBox.Text.Trim();
-                dialog.Description = "Select a full server backup folder (named server-full-...)";
-                dialog.SelectedPath = Directory.Exists(backupFolder) ? backupFolder : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                return;
+            }
 
-                if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath))
+            var selectedBackup = string.Empty;
+            var backupFolder = backupFolderTextBox.Text.Trim();
+            if (sourceChoice == DialogResult.Yes)
+            {
+                using (var dialog = new OpenFileDialog())
                 {
-                    return;
-                }
-
-                var selectedBackup = dialog.SelectedPath;
-                if (!Directory.Exists(selectedBackup))
-                {
-                    SetStatus("Selected backup folder does not exist.", true);
-                    return;
-                }
-
-                var confirm = MessageBox.Show(
-                    this,
-                    "This will copy all files from the selected backup folder over the current server install at:\n" + rootPath +
-                    "\n\nExisting files will be overwritten. Files in the server that are not in the backup will not be removed." +
-                    "\n\nAre you sure you want to continue?",
-                    AppTitle,
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Warning,
-                    MessageBoxDefaultButton.Button2);
-
-                if (confirm != DialogResult.Yes)
-                {
-                    return;
-                }
-
-                try
-                {
-                    CopyDirectory(selectedBackup, rootPath);
-                    AppendLog("Restored full server from backup: " + selectedBackup);
-
-                    if (currentState != null && Directory.Exists(currentState.ServerRoot))
+                    dialog.Filter = "Windrose full backups (*.zip)|*.zip|All files (*.*)|*.*";
+                    dialog.Title = "Select a zipped full server backup";
+                    dialog.InitialDirectory = Directory.Exists(backupFolder) ? backupFolder : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                    if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.FileName))
                     {
-                        LoadServer(currentState.ServerRoot);
-                        BindStateToUi();
+                        return;
                     }
 
-                    SetStatus("Full server restored from backup.", false);
-                }
-                catch (Exception ex)
-                {
-                    SetStatus("Restore failed: " + ex.Message, true);
+                    selectedBackup = dialog.FileName;
+                    if (!File.Exists(selectedBackup))
+                    {
+                        SetStatus("Selected backup archive does not exist.", true);
+                        return;
+                    }
                 }
             }
+            else
+            {
+                using (var dialog = new FolderBrowserDialog())
+                {
+                    dialog.Description = "Select a full server backup folder (named server-full-...)";
+                    dialog.SelectedPath = Directory.Exists(backupFolder) ? backupFolder : Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+
+                    if (dialog.ShowDialog(this) != DialogResult.OK || string.IsNullOrWhiteSpace(dialog.SelectedPath))
+                    {
+                        return;
+                    }
+
+                    selectedBackup = dialog.SelectedPath;
+                    if (!Directory.Exists(selectedBackup))
+                    {
+                        SetStatus("Selected backup folder does not exist.", true);
+                        return;
+                    }
+                }
+            }
+
+            var confirm = MessageBox.Show(
+                this,
+                "This will copy all files from the selected backup over the current server install at:\n" + rootPath +
+                "\n\nExisting files will be overwritten. Files in the server that are not in the backup will not be removed." +
+                "\n\nAre you sure you want to continue?",
+                AppTitle,
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+
+            if (confirm != DialogResult.Yes)
+            {
+                return;
+            }
+
+            try
+            {
+                RestoreFullServerFromPath(selectedBackup, rootPath);
+                AppendLog("Restored full server from backup: " + selectedBackup);
+
+                if (currentState != null && Directory.Exists(currentState.ServerRoot))
+                {
+                    LoadServer(currentState.ServerRoot);
+                    BindStateToUi();
+                }
+
+                SetStatus("Full server restored from backup.", false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus("Restore failed: " + ex.Message, true);
+            }
+        }
+
+        private void RestoreFullServerFromPath(string selectedBackup, string rootPath)
+        {
+            if (string.Equals(Path.GetExtension(selectedBackup), ".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                var tempExtractRoot = Path.Combine(Path.GetTempPath(), "windrose-restore-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(tempExtractRoot);
+                try
+                {
+                    ZipFile.ExtractToDirectory(selectedBackup, tempExtractRoot);
+                    CopyDirectory(tempExtractRoot, rootPath);
+                }
+                finally
+                {
+                    try
+                    {
+                        if (Directory.Exists(tempExtractRoot))
+                        {
+                            Directory.Delete(tempExtractRoot, true);
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+                return;
+            }
+
+            CopyDirectory(selectedBackup, rootPath);
         }
 
         private void RestoreCaptainSettings()
@@ -428,6 +518,7 @@ namespace WindroseServerManager.Desktop
                     backupSummary = backupResult.SkippedFileCount > 0
                         ? "Scheduled full backup completed with " + backupResult.SkippedFileCount + " skipped live files."
                         : "Scheduled full backup completed.";
+                    PruneOldScheduledFullBackups();
                 }
                 else
                 {
@@ -463,7 +554,9 @@ namespace WindroseServerManager.Desktop
             }
 
             var localNext = nextScheduledBackupUtc.Value.ToLocalTime();
-            scheduledBackupNextLabel.Text = "Next backup: " + localNext.ToString("ddd MMM d yyyy h:mm tt");
+            scheduledBackupNextLabel.Text = "Next backup: " + localNext.ToString("ddd MMM d yyyy h:mm tt")
+                + " | Keep last " + Decimal.ToInt32(scheduledBackupRetentionNumeric.Value) + " full backups"
+                + (zipFullBackupsCheckBox.Checked ? " | Full backups: .zip" : " | Full backups: folder");
         }
 
         private void ApplyScheduledRebootSettings()
@@ -1762,32 +1855,192 @@ namespace WindroseServerManager.Desktop
 
         private void InstallRconFiles()
         {
-            SetStatus("RCON integration has been removed from this public build.", true);
+            var versionDllSource = FindLocalRconVersionDllSource();
+            if (string.IsNullOrWhiteSpace(versionDllSource))
+            {
+                BrowseForRconVersionDll();
+                versionDllSource = FindLocalRconVersionDllSource();
+            }
+
+            if (string.IsNullOrWhiteSpace(versionDllSource) || !File.Exists(versionDllSource))
+            {
+                SetStatus("Select a local WindroseRCON version.dll first.", true);
+                return;
+            }
+
+            var destinationPath = GetRconVersionDllPath();
+            if (string.IsNullOrWhiteSpace(destinationPath))
+            {
+                SetStatus("Load a server root or choose an install directory first.", true);
+                return;
+            }
+
+            try
+            {
+                var destinationDirectory = Path.GetDirectoryName(destinationPath);
+                if (string.IsNullOrWhiteSpace(destinationDirectory))
+                {
+                    throw new InvalidOperationException("Could not resolve the server Win64 folder.");
+                }
+
+                Directory.CreateDirectory(destinationDirectory);
+
+                if (File.Exists(destinationPath))
+                {
+                    var overwrite = MessageBox.Show(
+                        this,
+                        "Replace the existing RCON version.dll?\n\n" + destinationPath,
+                        AppTitle,
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Question,
+                        MessageBoxDefaultButton.Button2);
+                    if (overwrite != DialogResult.Yes)
+                    {
+                        return;
+                    }
+                }
+
+                File.Copy(versionDllSource, destinationPath, true);
+                if (!File.Exists(GetRconSettingsPath()))
+                {
+                    WriteRconSettingsSnapshot(CreateDefaultRconSettings());
+                }
+
+                RefreshRconStatusUi();
+                SetStatus("Installed RCON version.dll into the server Win64 folder.", false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus("RCON install failed: " + ex.Message, true);
+            }
         }
 
         private void UninstallRconFiles()
         {
-            SetStatus("RCON integration has been removed from this public build.", true);
+            var versionDllPath = GetRconVersionDllPath();
+            var settingsDirectory = Path.GetDirectoryName(GetRconSettingsPath());
+            var hasVersionDll = !string.IsNullOrWhiteSpace(versionDllPath) && File.Exists(versionDllPath);
+            var hasSettingsDirectory = !string.IsNullOrWhiteSpace(settingsDirectory) && Directory.Exists(settingsDirectory);
+            if (!hasVersionDll && !hasSettingsDirectory)
+            {
+                SetStatus("No WindroseRCON install was found for the current server.", true);
+                return;
+            }
+
+            var confirm = MessageBox.Show(
+                this,
+                "Remove WindroseRCON from this server?\n\nThis deletes version.dll and moves the windrosercon settings folder to trash if present.",
+                AppTitle,
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Warning,
+                MessageBoxDefaultButton.Button2);
+            if (confirm != DialogResult.Yes)
+            {
+                return;
+            }
+
+            try
+            {
+                if (hasVersionDll)
+                {
+                    File.Delete(versionDllPath);
+                }
+
+                if (hasSettingsDirectory)
+                {
+                    MoveDirectoryToTrash(settingsDirectory);
+                }
+
+                rconPlayersTextBox.Text = "RCON removed from this server.";
+                RefreshRconStatusUi();
+                SetStatus("Removed WindroseRCON from the current server.", false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus("RCON uninstall failed: " + ex.Message, true);
+            }
         }
 
         private void SaveRconSettings()
         {
-            SetStatus("RCON integration has been removed from this public build.", true);
+            try
+            {
+                WriteRconSettingsSnapshot(BuildRconSettingsFromUi());
+                RefreshRconStatusUi();
+                SetStatus("Saved WindroseRCON settings.ini.", false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus("Save RCON settings failed: " + ex.Message, true);
+            }
         }
 
         private void TestRconConnection()
         {
-            SetStatus("RCON integration has been removed from this public build.", true);
+            try
+            {
+                var infoBody = ExecuteRconCommand(BuildRconSettingsFromUi(), "info");
+                rconPlayersTextBox.Text = string.IsNullOrWhiteSpace(infoBody)
+                    ? "RCON connected, but no info response body was returned."
+                    : infoBody;
+                lastKnownPlayerCount = QueryPlayerCountDisplay(BuildRconSettingsFromUi());
+                playerCountValueLabel.Text = lastKnownPlayerCount;
+                SetStatus("RCON connection succeeded.", false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus("RCON test failed: " + ex.Message, true);
+            }
         }
 
         private void RefreshRconPlayers()
         {
-            SetStatus("RCON integration has been removed from this public build.", true);
+            try
+            {
+                var playersBody = ExecuteRconCommand(BuildRconSettingsFromUi(), "showplayers");
+                rconPlayersTextBox.Text = string.IsNullOrWhiteSpace(playersBody)
+                    ? "No player list was returned."
+                    : playersBody;
+                PopulateRconPlayersList(playersBody);
+                lastKnownPlayerCount = QueryPlayerCountDisplay(BuildRconSettingsFromUi());
+                playerCountValueLabel.Text = lastKnownPlayerCount;
+                SetStatus("Refreshed online players from RCON.", false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus("Refresh players failed: " + ex.Message, true);
+            }
         }
 
         private string FindLocalRconVersionDllSource()
         {
-            return string.Empty;
+            var candidate = (rconDllPathTextBox.Text ?? string.Empty).Trim();
+            return File.Exists(candidate) ? candidate : string.Empty;
+        }
+
+        private void BrowseForRconVersionDll()
+        {
+            using (var dialog = new OpenFileDialog())
+            {
+                dialog.Filter = "RCON DLL|version.dll|DLL files|*.dll|All files|*.*";
+                dialog.Title = "Select the WindroseRCON version.dll";
+                dialog.CheckFileExists = true;
+                dialog.Multiselect = false;
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                rconDllPathTextBox.Text = dialog.FileName;
+                RefreshRconStatusUi();
+                UpdateProcessUi();
+            }
+        }
+
+        private void OpenRconDownloadPage()
+        {
+            OpenUrl("https://github.com/dkoz/WindroseRCON/releases");
+            SetStatus("Opened the WindroseRCON releases page in your browser.", false);
         }
 
         private void ImportModFolder()
@@ -2017,14 +2270,15 @@ namespace WindroseServerManager.Desktop
 
         private void EnableSelectedMod()
         {
-            var folderPath = GetSelectedInstalledModFolderPath();
-            if (string.IsNullOrWhiteSpace(folderPath))
+            var modPath = GetSelectedInstalledModFolderPath();
+            if (string.IsNullOrWhiteSpace(modPath))
             {
                 SetStatus("Select an installed mod first.", true);
                 return;
             }
 
-            var folderName = Path.GetFileName(folderPath);
+            var isDirectory = Directory.Exists(modPath);
+            var folderName = Path.GetFileName(modPath);
             const string disabledPrefix = "_disabled_";
             if (!folderName.StartsWith(disabledPrefix, StringComparison.OrdinalIgnoreCase))
             {
@@ -2033,29 +2287,51 @@ namespace WindroseServerManager.Desktop
             }
 
             var enabledName = folderName.Substring(disabledPrefix.Length);
-            var enabledPath = Path.Combine(Path.GetDirectoryName(folderPath), enabledName);
-            if (Directory.Exists(enabledPath))
+            var enabledPath = Path.Combine(Path.GetDirectoryName(modPath), enabledName);
+            if (isDirectory && Directory.Exists(enabledPath))
             {
                 SetStatus("Cannot enable mod because target folder already exists: " + enabledName, true);
                 return;
             }
 
-            Directory.Move(folderPath, enabledPath);
-            MoveInstalledModManifest(folderPath, enabledPath);
+            if (isDirectory)
+            {
+                Directory.Move(modPath, enabledPath);
+                MoveInstalledModManifest(modPath, enabledPath);
+            }
+            else
+            {
+                foreach (var path in GetLooseModBundlePaths(modPath))
+                {
+                    var targetPath = Path.Combine(Path.GetDirectoryName(path), Path.GetFileName(path).Substring(disabledPrefix.Length));
+                    if (File.Exists(targetPath))
+                    {
+                        throw new InvalidOperationException("Cannot enable loose mod because target file already exists: " + Path.GetFileName(targetPath));
+                    }
+                }
+
+                foreach (var path in GetLooseModBundlePaths(modPath))
+                {
+                    var targetPath = Path.Combine(Path.GetDirectoryName(path), Path.GetFileName(path).Substring(disabledPrefix.Length));
+                    File.Move(path, targetPath);
+                }
+            }
+
             PopulateModsInfo();
             SetStatus("Enabled mod: " + enabledName, false);
         }
 
         private void DisableSelectedMod()
         {
-            var folderPath = GetSelectedInstalledModFolderPath();
-            if (string.IsNullOrWhiteSpace(folderPath))
+            var modPath = GetSelectedInstalledModFolderPath();
+            if (string.IsNullOrWhiteSpace(modPath))
             {
                 SetStatus("Select an installed mod first.", true);
                 return;
             }
 
-            var folderName = Path.GetFileName(folderPath);
+            var isDirectory = Directory.Exists(modPath);
+            var folderName = Path.GetFileName(modPath);
             const string disabledPrefix = "_disabled_";
             if (folderName.StartsWith(disabledPrefix, StringComparison.OrdinalIgnoreCase))
             {
@@ -2063,32 +2339,54 @@ namespace WindroseServerManager.Desktop
                 return;
             }
 
-            var disabledPath = Path.Combine(Path.GetDirectoryName(folderPath), disabledPrefix + folderName);
-            if (Directory.Exists(disabledPath))
+            var disabledPath = Path.Combine(Path.GetDirectoryName(modPath), disabledPrefix + folderName);
+            if (isDirectory && Directory.Exists(disabledPath))
             {
                 SetStatus("Cannot disable mod because disabled folder already exists.", true);
                 return;
             }
 
-            Directory.Move(folderPath, disabledPath);
-            MoveInstalledModManifest(folderPath, disabledPath);
+            if (isDirectory)
+            {
+                Directory.Move(modPath, disabledPath);
+                MoveInstalledModManifest(modPath, disabledPath);
+            }
+            else
+            {
+                foreach (var path in GetLooseModBundlePaths(modPath))
+                {
+                    var targetPath = Path.Combine(Path.GetDirectoryName(path), disabledPrefix + Path.GetFileName(path));
+                    if (File.Exists(targetPath))
+                    {
+                        throw new InvalidOperationException("Cannot disable loose mod because disabled file already exists: " + Path.GetFileName(targetPath));
+                    }
+                }
+
+                foreach (var path in GetLooseModBundlePaths(modPath))
+                {
+                    var targetPath = Path.Combine(Path.GetDirectoryName(path), disabledPrefix + Path.GetFileName(path));
+                    File.Move(path, targetPath);
+                }
+            }
+
             PopulateModsInfo();
             SetStatus("Disabled mod: " + folderName, false);
         }
 
         private void RemoveSelectedMod()
         {
-            var folderPath = GetSelectedInstalledModFolderPath();
-            if (string.IsNullOrWhiteSpace(folderPath))
+            var modPath = GetSelectedInstalledModFolderPath();
+            if (string.IsNullOrWhiteSpace(modPath))
             {
                 SetStatus("Select an installed mod first.", true);
                 return;
             }
 
-            var folderName = Path.GetFileName(folderPath);
+            var isDirectory = Directory.Exists(modPath);
+            var folderName = Path.GetFileName(modPath);
             var confirm = MessageBox.Show(
                 this,
-                "Move mod folder to trash?\n\n" + folderPath,
+                (isDirectory ? "Move mod folder to trash?\n\n" : "Move loose mod files to trash?\n\n") + modPath,
                 AppTitle,
                 MessageBoxButtons.YesNo,
                 MessageBoxIcon.Warning,
@@ -2098,8 +2396,19 @@ namespace WindroseServerManager.Desktop
                 return;
             }
 
-            MoveDirectoryToTrash(folderPath);
-            DeleteInstalledModManifest(folderPath);
+            if (isDirectory)
+            {
+                MoveDirectoryToTrash(modPath);
+                DeleteInstalledModManifest(modPath);
+            }
+            else
+            {
+                foreach (var path in GetLooseModBundlePaths(modPath))
+                {
+                    MovePathToTrash(path);
+                }
+            }
+
             PopulateModsInfo();
             SetStatus("Moved mod to trash: " + folderName, false);
         }
@@ -2218,6 +2527,18 @@ namespace WindroseServerManager.Desktop
                 item.SubItems.Add(updateStatus);
                 item.SubItems.Add(source);
                 item.Tag = dir;
+                installedModsListView.Items.Add(item);
+            }
+
+            foreach (var entry in GetLooseInstalledModEntries(modsRoot))
+            {
+                var item = new ListViewItem(entry.DisplayName);
+                item.SubItems.Add(entry.Disabled ? "Disabled" : "Enabled");
+                item.SubItems.Add("-");
+                item.SubItems.Add(entry.LastUpdatedText);
+                item.SubItems.Add("Manual");
+                item.SubItems.Add("Loose files");
+                item.Tag = entry.PrimaryPath;
                 installedModsListView.Items.Add(item);
             }
 
@@ -2690,6 +3011,81 @@ namespace WindroseServerManager.Desktop
             return tag;
         }
 
+        private IEnumerable<InstalledLooseModEntry> GetLooseInstalledModEntries(string modsRoot)
+        {
+            var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".pak", ".ucas", ".utoc" };
+            var files = Directory.GetFiles(modsRoot)
+                .Where(delegate(string path) { return extensions.Contains(Path.GetExtension(path)); })
+                .OrderBy(delegate(string path) { return path; }, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            var groups = files.GroupBy(GetLooseModGroupKey, StringComparer.OrdinalIgnoreCase);
+            foreach (var group in groups)
+            {
+                var orderedFiles = group.OrderBy(delegate(string path) { return path; }, StringComparer.OrdinalIgnoreCase).ToList();
+                if (orderedFiles.Count == 0)
+                {
+                    continue;
+                }
+
+                var fileName = Path.GetFileName(orderedFiles[0]);
+                var disabled = fileName.StartsWith("_disabled_", StringComparison.OrdinalIgnoreCase);
+                var displayName = Path.GetFileNameWithoutExtension(disabled ? fileName.Substring("_disabled_".Length) : fileName);
+                var lastUpdatedText = "-";
+                try
+                {
+                    lastUpdatedText = orderedFiles
+                        .Select(File.GetLastWriteTimeUtc)
+                        .DefaultIfEmpty(DateTime.MinValue)
+                        .Max()
+                        .ToLocalTime()
+                        .ToString("yyyy-MM-dd HH:mm");
+                }
+                catch
+                {
+                }
+
+                yield return new InstalledLooseModEntry
+                {
+                    PrimaryPath = orderedFiles[0],
+                    DisplayName = displayName,
+                    Disabled = disabled,
+                    LastUpdatedText = lastUpdatedText
+                };
+            }
+        }
+
+        private IEnumerable<string> GetLooseModBundlePaths(string anyPathInBundle)
+        {
+            var directory = Path.GetDirectoryName(anyPathInBundle);
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            {
+                return Enumerable.Empty<string>();
+            }
+
+            var key = GetLooseModGroupKey(anyPathInBundle);
+            var extensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".pak", ".ucas", ".utoc" };
+            return Directory.GetFiles(directory)
+                .Where(delegate(string path)
+                {
+                    return extensions.Contains(Path.GetExtension(path))
+                        && string.Equals(GetLooseModGroupKey(path), key, StringComparison.OrdinalIgnoreCase);
+                })
+                .OrderBy(delegate(string path) { return path; }, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private string GetLooseModGroupKey(string path)
+        {
+            var fileName = Path.GetFileNameWithoutExtension(path) ?? string.Empty;
+            if (fileName.StartsWith("_disabled_", StringComparison.OrdinalIgnoreCase))
+            {
+                fileName = fileName.Substring("_disabled_".Length);
+            }
+
+            return fileName;
+        }
+
         private InstalledModManifest ReadInstalledModManifest(string folderPath)
         {
             try
@@ -2945,10 +3341,19 @@ namespace WindroseServerManager.Desktop
             public string InstalledUtc { get; set; }
         }
 
+        private sealed class InstalledLooseModEntry
+        {
+            public string PrimaryPath { get; set; }
+            public string DisplayName { get; set; }
+            public bool Disabled { get; set; }
+            public string LastUpdatedText { get; set; }
+        }
+
         private FullServerBackupResult CreateFullServerBackup(string rootPath)
         {
             var backupFolder = EnsureBackupFolder();
-            var targetFolder = Path.Combine(backupFolder, "server-full-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+            var backupStamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+            var targetFolder = Path.Combine(backupFolder, "server-full-" + backupStamp);
             if (targetFolder.StartsWith(Path.GetFullPath(rootPath), StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("Choose a backup folder outside the server install directory.");
@@ -2961,11 +3366,73 @@ namespace WindroseServerManager.Desktop
                 AppendLog("[backup skipped] " + skippedFile);
             }
 
+            var zipEnabled = zipFullBackupsCheckBox.Checked;
+            var targetPath = targetFolder;
+            if (zipEnabled)
+            {
+                var zipPath = targetFolder + ".zip";
+                if (File.Exists(zipPath))
+                {
+                    File.Delete(zipPath);
+                }
+
+                ZipFile.CreateFromDirectory(targetFolder, zipPath, CompressionLevel.Optimal, false);
+                Directory.Delete(targetFolder, true);
+                targetPath = zipPath;
+            }
+
             return new FullServerBackupResult
             {
-                TargetFolder = targetFolder,
+                TargetPath = targetPath,
                 SkippedFileCount = skippedFiles.Count
             };
+        }
+
+        private void PruneOldScheduledFullBackups()
+        {
+            var backupFolder = EnsureBackupFolder();
+            var keepCount = Decimal.ToInt32(scheduledBackupRetentionNumeric.Value);
+            var fullBackups = Directory.GetFileSystemEntries(backupFolder, "server-full-*", SearchOption.TopDirectoryOnly)
+                .Where(delegate(string path)
+                {
+                    return Directory.Exists(path)
+                        || string.Equals(Path.GetExtension(path), ".zip", StringComparison.OrdinalIgnoreCase);
+                })
+                .OrderByDescending(delegate(string path)
+                {
+                    try
+                    {
+                        return Directory.Exists(path)
+                            ? Directory.GetCreationTimeUtc(path)
+                            : File.GetCreationTimeUtc(path);
+                    }
+                    catch
+                    {
+                        return DateTime.MinValue;
+                    }
+                })
+                .ToList();
+
+            foreach (var oldBackup in fullBackups.Skip(keepCount))
+            {
+                try
+                {
+                    if (Directory.Exists(oldBackup))
+                    {
+                        MoveDirectoryToTrash(oldBackup);
+                    }
+                    else if (File.Exists(oldBackup))
+                    {
+                        MovePathToTrash(oldBackup);
+                    }
+
+                    AppendLog("Pruned old scheduled full backup: " + oldBackup);
+                }
+                catch (Exception ex)
+                {
+                    AppendLog("Could not prune old full backup " + oldBackup + ": " + ex.Message);
+                }
+            }
         }
 
         private static void CopyDirectory(string sourceDir, string destinationDir, IList<string> skippedFiles = null)
@@ -3069,7 +3536,7 @@ namespace WindroseServerManager.Desktop
 
         private sealed class FullServerBackupResult
         {
-            public string TargetFolder { get; set; }
+            public string TargetPath { get; set; }
             public int SkippedFileCount { get; set; }
         }
 
@@ -3572,6 +4039,8 @@ namespace WindroseServerManager.Desktop
             RefreshWarnings();
             PopulateModsInfo();
             RefreshModsProviderUi();
+            LoadRconSettingsIntoUi();
+            RefreshRconStatusUi();
             setActiveWorldButton.Enabled = currentState.SelectedWorldKey != null;
             UpdateLaunchTargetUi();
             UpdateProcessUi();

@@ -57,11 +57,12 @@ namespace WindroseServerManager.Desktop
         private static void BindPreferredWidth(Control control, Panel panel, int preferredWidth, int minWidth)
         {
             control.Anchor = AnchorStyles.Top | AnchorStyles.Left;
-            control.Width = FieldInputWidth;
+            var targetWidth = preferredWidth > 0 ? preferredWidth : FieldInputWidth;
+            control.Width = targetWidth;
             panel.Resize += delegate
             {
-                // Shrink only if the column itself is narrower than our fixed width
-                control.Width = Math.Max(minWidth, Math.Min(FieldInputWidth, panel.ClientSize.Width - 4));
+                // Shrink only if the column itself is narrower than our preferred width.
+                control.Width = Math.Max(minWidth, Math.Min(targetWidth, panel.ClientSize.Width - 4));
             };
         }
 
@@ -129,6 +130,22 @@ namespace WindroseServerManager.Desktop
             panel.Height = FieldPanelHeight;
             layout.Controls.Add(panel);
             return checkBox;
+        }
+
+        private static void AddLabeledControl(TableLayoutPanel layout, string label, Control control, int column, int row, int width)
+        {
+            var panel = CreateFieldPanel(label);
+            var top = AddFieldLabel(panel, label);
+            control.Left = 0;
+            control.Top = top;
+            control.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+            if (width > 0)
+            {
+                BindPreferredWidth(control, panel, width, 120);
+            }
+            panel.Controls.Add(control);
+            panel.Height = Math.Max(FieldPanelHeight, control.Bottom + 8);
+            layout.Controls.Add(panel);
         }
 
         private static Panel CreateFieldPanel(string label)
@@ -260,12 +277,22 @@ namespace WindroseServerManager.Desktop
             StyleButton(importModFolderButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
             StyleButton(searchCurseForgeButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
             StyleButton(installSelectedCurseForgeButton, currentThemeColors.ButtonWarning, currentThemeColors.ButtonText);
+            StyleButton(browseRconDllButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
             StyleButton(installRconButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
             StyleButton(uninstallRconButton, currentThemeColors.ButtonDanger, currentThemeColors.ButtonText);
             StyleButton(saveRconSettingsButton, currentThemeColors.ButtonWarning, currentThemeColors.ButtonText);
             StyleButton(testRconButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
             StyleButton(refreshRconPlayersButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
             StyleButton(viewRconLicenseButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
+            StyleButton(rconHelpButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
+            StyleButton(rconInfoButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
+            StyleButton(rconShowPlayersButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
+            StyleButton(rconPlayerInfoButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
+            StyleButton(rconGetPosButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
+            StyleButton(rconKickButton, currentThemeColors.ButtonWarning, currentThemeColors.ButtonText);
+            StyleButton(rconBanButton, currentThemeColors.ButtonDanger, currentThemeColors.ButtonText);
+            StyleButton(rconUnbanButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
+            StyleButton(rconBanListButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
             StyleButton(refreshInstalledModsButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
             StyleButton(enableModButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
             StyleButton(disableModButton, currentThemeColors.ButtonWarning, currentThemeColors.ButtonText);
@@ -293,6 +320,9 @@ namespace WindroseServerManager.Desktop
             themeComboBox.ForeColor = currentThemeColors.InputForeground;
             tabs.ApplyTheme(currentThemeColors);
             worldsListView.ApplyTheme(currentThemeColors);
+            availableModsListView.ApplyTheme(currentThemeColors);
+            installedModsListView.ApplyTheme(currentThemeColors);
+            rconPlayersListView.ApplyTheme(currentThemeColors);
             if (IsHandleCreated)
             {
                 ApplyNativeControlTheme();
@@ -316,6 +346,7 @@ namespace WindroseServerManager.Desktop
                 SetWindowTheme(warningsListBox.Handle, scrollTheme, null);
                 SetWindowTheme(availableModsListView.Handle, scrollTheme, null);
                 SetWindowTheme(installedModsListView.Handle, scrollTheme, null);
+                SetWindowTheme(rconPlayersListView.Handle, scrollTheme, null);
                 ApplyScrollThemeRecursive(this, scrollTheme);
                 tabs.Invalidate();
             }
