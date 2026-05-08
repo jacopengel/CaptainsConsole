@@ -26,7 +26,11 @@ namespace WindroseServerManager.Desktop
             helpToolTip.SetToolTip(installDirTextBox, "Directory where Windrose Dedicated Server should be installed or updated.");
             helpToolTip.SetToolTip(chooseInstallFolderButton, "Pick where the dedicated server should be installed.");
             helpToolTip.SetToolTip(browseSteamCmdButton, "Browse to the folder that contains steamcmd.exe.");
-            helpToolTip.SetToolTip(browseInstallDirButton, "Choose where the dedicated server should be installed.");
+            helpToolTip.SetToolTip(browseInstallDirButton, "Choose where the dedicated server should be installed, or pick an existing server folder to load it.");
+            helpToolTip.SetToolTip(installedServerVersionLabel, "Installed server version read from the local Windrose server files.");
+            helpToolTip.SetToolTip(latestServerVersionLabel, "Latest official Windrose dedicated server version published by the developers.");
+            helpToolTip.SetToolTip(serverUpdateSummaryLabel, "Shows whether the installed Windrose server version matches the latest official Windrose version.");
+            helpToolTip.SetToolTip(checkServerUpdatesButton, "Check the latest official Windrose dedicated server version without installing anything.");
             helpToolTip.SetToolTip(openInstallDirButton, "Open the current install directory in Explorer. The folder is created if it does not exist yet.");
             helpToolTip.SetToolTip(installSteamCmdButton, "Download and set up SteamCMD in C:\\WindroseCC\\steamcmd using Valve's official Windows zip.");
             helpToolTip.SetToolTip(installServerButton, "Install the Windrose dedicated server into the selected install folder using SteamCMD.");
@@ -57,7 +61,6 @@ namespace WindroseServerManager.Desktop
             helpToolTip.SetToolTip(createNewWorldButton, "Create a new world. If a world is selected it will be cloned; if no worlds exist yet, Captain's Console will create an initial default world.");
             helpToolTip.SetToolTip(importWorldButton, "Import a world folder or another Windrose server's saved worlds into this server.");
             helpToolTip.SetToolTip(deleteWorldButton, "Delete the selected world and its save folder permanently.");
-            helpToolTip.SetToolTip(openSteamCmdGuideButton, "Open the official Windrose dedicated server guide with the SteamCMD instructions.");
             helpToolTip.SetToolTip(startServerButton, "Start the detected Windrose server launch target from inside this app.");
             helpToolTip.SetToolTip(stopServerButton, "Stop the process tree for the server launched by this app.");
             helpToolTip.SetToolTip(restartServerButton, "Restart the detected launch target.");
@@ -174,6 +177,12 @@ namespace WindroseServerManager.Desktop
                 if (dialog.ShowDialog(this) == DialogResult.OK)
                 {
                     installDirTextBox.Text = dialog.SelectedPath;
+                    pathTextBox.Text = dialog.SelectedPath;
+
+                    if (WindroseRepository.IsLikelyInstalledServerRoot(dialog.SelectedPath))
+                    {
+                        LoadServer(dialog.SelectedPath);
+                    }
                 }
             }
         }
@@ -2856,6 +2865,7 @@ namespace WindroseServerManager.Desktop
 
         private static string DownloadStringFromUrl(string url, IDictionary<string, string> headers)
         {
+            EnsureModernSecurityProtocols();
             var request = (HttpWebRequest)WebRequest.Create(url);
             request.Method = "GET";
             request.AutomaticDecompression = DecompressionMethods.Deflate | DecompressionMethods.GZip;
@@ -2879,6 +2889,7 @@ namespace WindroseServerManager.Desktop
 
         private static void DownloadFileToPath(string url, string destinationPath, IDictionary<string, string> headers)
         {
+            EnsureModernSecurityProtocols();
             var request = (HttpWebRequest)WebRequest.Create(url);
             request.Method = "GET";
             request.AutomaticDecompression = DecompressionMethods.Deflate | DecompressionMethods.GZip;
@@ -2898,6 +2909,15 @@ namespace WindroseServerManager.Desktop
             {
                 responseStream.CopyTo(fileStream);
             }
+        }
+
+        private static void EnsureModernSecurityProtocols()
+        {
+            ServicePointManager.Expect100Continue = false;
+            ServicePointManager.SecurityProtocol =
+                SecurityProtocolType.Tls |
+                SecurityProtocolType.Tls11 |
+                SecurityProtocolType.Tls12;
         }
 
         private static void ApplyRequestHeader(HttpWebRequest request, string key, string value)
@@ -3945,6 +3965,8 @@ namespace WindroseServerManager.Desktop
                     AppendLog("No launch target detected in the loaded root. Start/stop controls will stay disabled.");
                 }
                 SetStatus("Loaded " + currentState.ServerRoot + ".", false);
+                RefreshServerVersionInfo();
+                BeginServerUpdateCheck(false);
             }
             catch (Exception ex)
             {
@@ -3972,6 +3994,8 @@ namespace WindroseServerManager.Desktop
                             UpdateWindowTitle();
                             StartServerFileLogTail(currentState.ServerRoot);
                             SetStatus("Created default ServerDescription.json and loaded server.", false);
+                            RefreshServerVersionInfo();
+                            BeginServerUpdateCheck(false);
                             return;
                         }
                         catch (Exception createEx)

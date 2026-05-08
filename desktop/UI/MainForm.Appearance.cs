@@ -222,7 +222,7 @@ namespace WindroseServerManager.Desktop
         {
             Action sync = delegate
             {
-                groupBox.Height = Math.Max(96, content.PreferredSize.Height + 52);
+                groupBox.Height = Math.Max(96, content.PreferredSize.Height + 42);
             };
 
             content.SizeChanged += delegate { sync(); };
@@ -268,7 +268,7 @@ namespace WindroseServerManager.Desktop
             StyleButton(browseInstallDirButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
             StyleButton(openInstallDirButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
             StyleButton(chooseInstallFolderButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
-            StyleButton(openSteamCmdGuideButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
+            StyleButton(checkServerUpdatesButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
             StyleButton(installSteamCmdButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
             StyleButton(installServerButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
             StyleButton(updateServerButton, currentThemeColors.ButtonWarning, currentThemeColors.ButtonText);
@@ -318,6 +318,9 @@ namespace WindroseServerManager.Desktop
             playerCountValueLabel.ForeColor = currentThemeColors.MetaForeground;
             rconStatusLabel.ForeColor = currentThemeColors.MetaForeground;
             themeLabel.ForeColor = currentThemeColors.HeaderForeground;
+            installedServerVersionLabel.ForeColor = currentThemeColors.HeaderForeground;
+            latestServerVersionLabel.ForeColor = currentThemeColors.HeaderForeground;
+            serverUpdateSummaryLabel.ForeColor = currentThemeColors.HeaderMutedForeground;
             themeComboBox.FlatStyle = FlatStyle.Flat;
             themeComboBox.BackColor = currentThemeColors.InputBackground;
             themeComboBox.ForeColor = currentThemeColors.InputForeground;
@@ -522,9 +525,10 @@ namespace WindroseServerManager.Desktop
             button.FlatAppearance.BorderSize = 1;
             button.FlatAppearance.BorderColor = ControlPaint.Dark(backColor, 0.18F);
             button.Cursor = Cursors.Hand;
-            button.Height = Math.Max(button.Height, 32);
+            button.Height = Math.Max(button.Height, 36);
+            button.TextAlign = ContentAlignment.MiddleCenter;
             button.Margin = new Padding(0, 0, 10, 8);
-            button.Padding = new Padding(10, 4, 10, 4);
+            button.Padding = new Padding(10, 2, 10, 2);
         }
     }
 }

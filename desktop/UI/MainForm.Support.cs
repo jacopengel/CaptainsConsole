@@ -443,6 +443,12 @@ namespace WindroseServerManager.Desktop
             appUpdateButton.Text = "Check Updates";
             appUpdateButton.Enabled = true;
 
+            if (!string.IsNullOrWhiteSpace(appUpdateStatusMessage))
+            {
+                appUpdateStatusLabel.Text = appUpdateStatusMessage;
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(GetUpdateFeedUrl()))
             {
                 appUpdateStatusLabel.Text = "No update feed configured.";
@@ -466,6 +472,7 @@ namespace WindroseServerManager.Desktop
                 availableUpdateVersion = string.Empty;
                 availableUpdateDownloadUrl = string.Empty;
                 availableUpdateNotes = string.Empty;
+                appUpdateStatusMessage = "No update feed configured.";
                 UpdateAppVersionUi();
                 if (userInitiated)
                 {
@@ -487,7 +494,8 @@ namespace WindroseServerManager.Desktop
                     var downloadUrl = string.IsNullOrWhiteSpace(manifest.downloadUrl)
                         ? (manifest.installerUrl ?? string.Empty)
                         : manifest.downloadUrl;
-                    var hasNewerVersion = IsRemoteVersionNewer(currentApplicationVersion, manifest.version);
+                    string compareMessage;
+                    var hasNewerVersion = IsRemoteVersionNewer(currentApplicationVersion, manifest.version, out compareMessage);
 
                     BeginInvoke((MethodInvoker)delegate
                     {
@@ -496,6 +504,22 @@ namespace WindroseServerManager.Desktop
                         availableUpdateVersion = manifest.version ?? string.Empty;
                         availableUpdateDownloadUrl = downloadUrl ?? string.Empty;
                         availableUpdateNotes = manifest.notes ?? string.Empty;
+                        if (updateAvailable)
+                        {
+                            appUpdateStatusMessage = "Update available: " + availableUpdateVersion;
+                        }
+                        else if (!string.IsNullOrWhiteSpace(compareMessage))
+                        {
+                            appUpdateStatusMessage = compareMessage;
+                        }
+                        else if (hasNewerVersion && string.IsNullOrWhiteSpace(downloadUrl))
+                        {
+                            appUpdateStatusMessage = "Manifest has version " + availableUpdateVersion + " but no download URL.";
+                        }
+                        else
+                        {
+                            appUpdateStatusMessage = "Installed " + currentApplicationVersion + " is current.";
+                        }
                         UpdateAppVersionUi();
 
                         if (userInitiated)
@@ -503,6 +527,14 @@ namespace WindroseServerManager.Desktop
                             if (updateAvailable)
                             {
                                 SetStatus("Application update " + availableUpdateVersion + " is available.", false);
+                            }
+                            else if (hasNewerVersion && string.IsNullOrWhiteSpace(downloadUrl))
+                            {
+                                SetStatus("Update manifest advertises version " + availableUpdateVersion + " but has no download URL.", true);
+                            }
+                            else if (!string.IsNullOrWhiteSpace(compareMessage) && compareMessage.IndexOf("invalid", StringComparison.OrdinalIgnoreCase) >= 0)
+                            {
+                                SetStatus(compareMessage, true);
                             }
                             else
                             {
@@ -520,6 +552,7 @@ namespace WindroseServerManager.Desktop
                         availableUpdateVersion = string.Empty;
                         availableUpdateDownloadUrl = string.Empty;
                         availableUpdateNotes = string.Empty;
+                        appUpdateStatusMessage = "Update check failed.";
                         UpdateAppVersionUi();
                         if (userInitiated)
                         {
@@ -572,8 +605,7 @@ namespace WindroseServerManager.Desktop
                     {
                         updateCheckInProgress = false;
                         UpdateAppVersionUi();
-                        OpenPathInShell(destinationPath);
-                        SetStatus("Update installer launched. Finish the install when you're ready.", false);
+                        LaunchUpdateInstallerAndCloseCurrentApp(destinationPath);
                     });
                 }
                 catch (Exception ex)
@@ -586,6 +618,34 @@ namespace WindroseServerManager.Desktop
                     });
                 }
             });
+        }
+
+        private void LaunchUpdateInstallerAndCloseCurrentApp(string installerPath)
+        {
+            if (string.IsNullOrWhiteSpace(installerPath) || !File.Exists(installerPath))
+            {
+                SetStatus("Update installer was downloaded but could not be found.", true);
+                return;
+            }
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = installerPath,
+                UseShellExecute = true
+            };
+
+            Process.Start(startInfo);
+            SetStatus("Update installer launched. Captain's Console will now close so the update can finish.", false);
+
+            var closeTimer = new Timer();
+            closeTimer.Interval = 900;
+            closeTimer.Tick += delegate
+            {
+                closeTimer.Stop();
+                closeTimer.Dispose();
+                Close();
+            };
+            closeTimer.Start();
         }
 
         private static string SanitizeFileNameFragment(string value)
@@ -623,15 +683,29 @@ namespace WindroseServerManager.Desktop
             }
         }
 
-        private static bool IsRemoteVersionNewer(string currentVersionText, string remoteVersionText)
+        private static bool IsRemoteVersionNewer(string currentVersionText, string remoteVersionText, out string message)
         {
+            message = string.Empty;
             Version currentVersion;
             Version remoteVersion;
-            if (!Version.TryParse(currentVersionText, out currentVersion) || !Version.TryParse(remoteVersionText, out remoteVersion))
+            if (!Version.TryParse(currentVersionText, out currentVersion))
             {
+                message = "Installed version is invalid: " + currentVersionText;
                 return false;
             }
 
+            if (!Version.TryParse(remoteVersionText, out remoteVersion))
+            {
+                message = "Manifest version is invalid: " + (string.IsNullOrWhiteSpace(remoteVersionText) ? "(empty)" : remoteVersionText);
+                return false;
+            }
+
+            if (remoteVersion > currentVersion)
+            {
+                return true;
+            }
+
+            message = "Installed " + currentVersion + " is current.";
             return remoteVersion > currentVersion;
         }
 

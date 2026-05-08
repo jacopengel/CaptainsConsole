@@ -66,7 +66,7 @@ namespace WindroseServerManager.Desktop
 
             // 2. Fill the box body (below border line) with the group fill color
             using (var b = new SolidBrush(FillColor))
-                g.FillRectangle(b, 1, borderY, Width - 2, Height - borderY - 1);
+                g.FillRectangle(b, 1, borderY, Math.Max(0, Width - 3), Math.Max(0, Height - borderY - 3));
 
             if (WatermarkImage != null && Width > 20 && Height - borderY > 20)
             {
@@ -119,11 +119,13 @@ namespace WindroseServerManager.Desktop
             // 4. Draw border with gap for caption
             using (var pen = new Pen(BorderColor, 1F))
             {
+                var right = Math.Max(2, Width - 3);
+                var bottom = Math.Max(borderY + 1, Height - 3);
                 if (labelLeft > 3) g.DrawLine(pen, 1, borderY, labelLeft - 2, borderY);
-                g.DrawLine(pen, gapRight, borderY, Width - 2, borderY);
-                g.DrawLine(pen, 1, borderY, 1, Height - 2);
-                g.DrawLine(pen, Width - 2, borderY, Width - 2, Height - 2);
-                g.DrawLine(pen, 1, Height - 2, Width - 2, Height - 2);
+                g.DrawLine(pen, gapRight, borderY, right, borderY);
+                g.DrawLine(pen, 1, borderY, 1, bottom);
+                g.DrawLine(pen, right, borderY, right, bottom);
+                g.DrawLine(pen, 1, bottom, right, bottom);
             }
 
             // 5. Draw caption text (vertically centered on the border line)

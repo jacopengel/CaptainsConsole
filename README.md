@@ -84,6 +84,87 @@ You can also run it from PowerShell:
 
 If Windows blocks the file because it came from another machine or download source, right-click the executable, open `Properties`, and allow it to run if needed.
 
+## Configure app updates
+
+Captain's Console can show its own version at the top of the app and check whether a newer installer is available.
+
+### How it works
+
+The app looks for a plain text file named:
+
+```text
+update-feed-url.txt
+```
+
+The file should contain one URL only: the URL to a JSON manifest that describes the latest release.
+
+The app checks for this file in:
+
+- the same folder as `WindroseCaptainsConsole.exe`
+- the parent folder
+- the grandparent folder
+
+### Manifest format
+
+The JSON manifest should look like this:
+
+```json
+{
+  "version": "0.9.6.0",
+  "downloadUrl": "https://your-download-host.example.com/WindroseCaptainsConsoleSetup_v0.9.6.0.exe",
+  "notes": "Bug fixes, backup improvements, and RCON UI updates."
+}
+```
+
+`downloadUrl` can also be named `installerUrl` if you prefer.
+
+### Example setup
+
+1. Upload your latest installer somewhere public.
+2. Upload a JSON manifest like [update-manifest.example.json](./update-manifest.example.json).
+3. Create `update-feed-url.txt` next to the exe and paste the manifest URL into it.
+
+Example `update-feed-url.txt` contents:
+
+```text
+https://your-download-host.example.com/update-manifest.json
+```
+
+An example feed file is included here:
+
+- [update-feed-url.example.txt](./update-feed-url.example.txt)
+- [update-manifest.example.json](./update-manifest.example.json)
+
+## Build the installer
+
+Captain's Console also includes an Inno Setup installer project so you can ship a normal Windows setup wizard with install location selection, shortcuts, and uninstall support.
+
+### What you need
+
+- Inno Setup 6 installed
+- PowerShell
+
+### Build steps
+
+1. Open PowerShell in the project root.
+2. Run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\installer\build-installer.ps1
+```
+
+3. If Inno Setup is installed, the finished installer will be created in:
+
+```text
+dist\
+```
+
+The installer script itself is stored at:
+
+```text
+installer\WindroseCaptainsConsole.iss
+```
+
 ## Why use it
 
 Captain's Console is meant to reduce the repeated pain points of hosting a Windrose server:

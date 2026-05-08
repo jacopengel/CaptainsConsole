@@ -27,6 +27,8 @@ namespace WindroseServerManager.Desktop
         private const string ModProviderNexusMods = "Nexus Mods";
         private const string EmbeddedAppIconResourceName = "WindroseServerManager.Resources.AppIcon";
         private const string UpdateFeedFileName = "update-feed-url.txt";
+        private const string WindroseDedicatedServerGuideUrl = "https://playwindrose.com/dedicated-server-guide/";
+        private const string WindroseDedicatedServerGuideFallbackUrl = "https://playwindrose.com/windrose-crew/dedicated-server-guide/";
         private const int CurseForgeGameId = 99078;
         private const int SidebarPreferredWidth = 320;
         private const int SteamCmdMissingConfigurationRetryLimit = 2;
@@ -58,10 +60,10 @@ namespace WindroseServerManager.Desktop
         private readonly Button browseInstallDirButton;
         private readonly Button openInstallDirButton;
         private readonly Button chooseInstallFolderButton;
+        private readonly Button checkServerUpdatesButton;
         private readonly Button installSteamCmdButton;
         private readonly Button installServerButton;
         private readonly Button updateServerButton;
-        private readonly Button openSteamCmdGuideButton;
         private readonly Button openCurseForgeButton;
         private readonly Button openModsFolderButton;
         private readonly Button importModFolderButton;
@@ -102,6 +104,9 @@ namespace WindroseServerManager.Desktop
         private readonly Label subtitleLabel;
         private readonly Label appVersionLabel;
         private readonly Label appUpdateStatusLabel;
+        private readonly Label installedServerVersionLabel;
+        private readonly Label latestServerVersionLabel;
+        private readonly Label serverUpdateSummaryLabel;
         private readonly Button appUpdateButton;
         private readonly Panel serverStateDotPanel;
         private readonly ProgressBar provisioningProgressBar;
@@ -222,6 +227,12 @@ namespace WindroseServerManager.Desktop
         private string availableUpdateVersion;
         private string availableUpdateDownloadUrl;
         private string availableUpdateNotes;
+        private string appUpdateStatusMessage;
+        private bool serverUpdateCheckInProgress;
+        private bool serverUpdateAvailable;
+        private string installedServerVersionDisplay;
+        private string latestServerVersionDisplay;
+        private string serverUpdateSummaryMessage;
         private readonly Panel topHeaderPanel;
         private string selectedModsProvider = ModProviderCurseForge;
         private string storedCurseForgeApiKey = string.Empty;
@@ -294,8 +305,14 @@ namespace WindroseServerManager.Desktop
             availableUpdateVersion = string.Empty;
             availableUpdateDownloadUrl = string.Empty;
             availableUpdateNotes = string.Empty;
+            appUpdateStatusMessage = "Updates not checked yet.";
             updateCheckInProgress = false;
             updateAvailable = false;
+            serverUpdateCheckInProgress = false;
+            serverUpdateAvailable = false;
+            installedServerVersionDisplay = "not detected";
+            latestServerVersionDisplay = "not checked";
+            serverUpdateSummaryMessage = "Server update status not checked.";
 
             var root = new TableLayoutPanel();
             root.Dock = DockStyle.Fill;
@@ -316,7 +333,7 @@ namespace WindroseServerManager.Desktop
 
             titleLabel = new Label();
             titleLabel.Text = AppTitle;
-            titleLabel.Font = new Font("Georgia", 19F, FontStyle.Bold);
+            titleLabel.Font = new Font("Georgia", 17F, FontStyle.Bold);
             titleLabel.AutoSize = true;
             titleLabel.Location = new Point(0, 4);
             titleLabel.ForeColor = Color.FromArgb(227, 197, 122);
@@ -326,11 +343,11 @@ namespace WindroseServerManager.Desktop
             subtitleLabel.Text = "Locate or provision a server first, then run it, tune it, and manage its community mods.";
             subtitleLabel.AutoSize = true;
             subtitleLabel.ForeColor = Color.FromArgb(196, 205, 213);
-            subtitleLabel.Location = new Point(2, 40);
+            subtitleLabel.Location = new Point(2, 32);
             topHeaderPanel.Controls.Add(subtitleLabel);
 
             var appVersionPanel = new FlowLayoutPanel();
-            appVersionPanel.Location = new Point(0, 74);
+            appVersionPanel.Location = new Point(0, 66);
             appVersionPanel.Width = 1230;
             appVersionPanel.Height = 30;
             appVersionPanel.WrapContents = false;
@@ -387,13 +404,14 @@ namespace WindroseServerManager.Desktop
             positionThemeControls();
 
             var pathPanel = new FlowLayoutPanel();
-            pathPanel.Location = new Point(0, 112);
+            pathPanel.Location = new Point(0, 100);
             pathPanel.Width = 1230;
-            pathPanel.Height = 36;
+            pathPanel.Height = 34;
             pathPanel.WrapContents = false;
             pathPanel.FlowDirection = FlowDirection.LeftToRight;
             pathPanel.BackColor = Color.FromArgb(21, 33, 46);
             topHeaderPanel.Controls.Add(pathPanel);
+            pathPanel.Visible = false;
 
             pathTextBox = new TextBox();
             pathTextBox.Width = 620;
@@ -412,23 +430,24 @@ namespace WindroseServerManager.Desktop
             pathPanel.Controls.Add(loadButton);
 
             var serverMetaPanel = new FlowLayoutPanel();
-            serverMetaPanel.Location = new Point(0, 156);
+            serverMetaPanel.Location = new Point(0, 98);
             serverMetaPanel.Width = 1230;
-            serverMetaPanel.Height = 28;
+            serverMetaPanel.Height = 24;
             serverMetaPanel.WrapContents = false;
             serverMetaPanel.FlowDirection = FlowDirection.LeftToRight;
             serverMetaPanel.BackColor = Color.Transparent;
             topHeaderPanel.Controls.Add(serverMetaPanel);
 
             var actionGroupsPanel = new TableLayoutPanel();
-            actionGroupsPanel.Location = new Point(0, 192);
+            actionGroupsPanel.Location = new Point(0, 126);
             actionGroupsPanel.Width = 1230;
             actionGroupsPanel.Height = 164;
-            actionGroupsPanel.ColumnCount = 3;
+            actionGroupsPanel.ColumnCount = 2;
             actionGroupsPanel.RowCount = 1;
-            actionGroupsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 44F));
-            actionGroupsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 24F));
-            actionGroupsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 32F));
+            actionGroupsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70F));
+            actionGroupsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30F));
+            actionGroupsPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            actionGroupsPanel.Padding = new Padding(0, 0, 0, 6);
             actionGroupsPanel.BackColor = Color.Transparent;
             topHeaderPanel.Controls.Add(actionGroupsPanel);
 
@@ -441,20 +460,8 @@ namespace WindroseServerManager.Desktop
             {
                 var availableWidth = Math.Max(340, topHeaderPanel.ClientSize.Width - 8);
                 appVersionPanel.Width = Math.Max(340, availableWidth - appVersionPanel.Left);
-                pathPanel.Width = Math.Max(340, availableWidth - pathPanel.Left);
                 serverMetaPanel.Width = Math.Max(340, availableWidth - serverMetaPanel.Left);
                 actionGroupsPanel.Width = Math.Max(340, availableWidth - actionGroupsPanel.Left);
-
-                if (pathPanel.WrapContents)
-                {
-                    pathTextBox.Width = Math.Max(220, Math.Min(720, pathPanel.ClientSize.Width - 8));
-                }
-                else
-                {
-                    var pathReservedWidth = browseButton.Width + loadButton.Width
-                        + browseButton.Margin.Horizontal + loadButton.Margin.Horizontal + 24;
-                    pathTextBox.Width = Math.Max(220, Math.Min(880, pathPanel.ClientSize.Width - pathReservedWidth));
-                }
 
                 appUpdateStatusLabel.MaximumSize = new Size(Math.Max(180, appVersionPanel.ClientSize.Width - appVersionLabel.Width - appUpdateButton.Width - 48), 0);
             };
@@ -468,44 +475,69 @@ namespace WindroseServerManager.Desktop
             layoutHeaderBands();
 
             var provisionGroup = CreateGroupBox("Harbor Setup", 0, 0);
-            provisionGroup.Dock = DockStyle.Fill;
+            provisionGroup.Dock = DockStyle.Top;
+            provisionGroup.Margin = new Padding(0, 0, 10, 4);
+            var actionsColumnPanel = new TableLayoutPanel();
+            actionsColumnPanel.Dock = DockStyle.Top;
+            actionsColumnPanel.AutoSize = true;
+            actionsColumnPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            actionsColumnPanel.ColumnCount = 1;
+            actionsColumnPanel.RowCount = 2;
+            actionsColumnPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            actionsColumnPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            actionsColumnPanel.Margin = new Padding(0);
+            actionsColumnPanel.BackColor = Color.Transparent;
             var runtimeGroup = CreateGroupBox("Raise Anchor", 0, 0);
-            runtimeGroup.Dock = DockStyle.Fill;
+            runtimeGroup.Dock = DockStyle.Top;
+            runtimeGroup.Margin = new Padding(0, 0, 0, 6);
             var utilityGroup = CreateGroupBox("Deck Tools", 0, 0);
-            utilityGroup.Dock = DockStyle.Fill;
+            utilityGroup.Dock = DockStyle.Top;
+            utilityGroup.Margin = new Padding(0);
             actionGroupsPanel.Controls.Add(provisionGroup, 0, 0);
-            actionGroupsPanel.Controls.Add(runtimeGroup, 1, 0);
-            actionGroupsPanel.Controls.Add(utilityGroup, 2, 0);
+            actionGroupsPanel.Controls.Add(actionsColumnPanel, 1, 0);
+            actionsColumnPanel.Controls.Add(runtimeGroup, 0, 0);
+            actionsColumnPanel.Controls.Add(utilityGroup, 0, 1);
 
             var provisionGroupLayout = new TableLayoutPanel();
-            provisionGroupLayout.Dock = DockStyle.Fill;
+            provisionGroupLayout.Dock = DockStyle.Top;
+            provisionGroupLayout.AutoSize = true;
+            provisionGroupLayout.AutoSizeMode = AutoSizeMode.GrowAndShrink;
             provisionGroupLayout.ColumnCount = 1;
-            provisionGroupLayout.RowCount = 3;
-            provisionGroupLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
-            provisionGroupLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34F));
-            provisionGroupLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            provisionGroupLayout.RowCount = 4;
+            provisionGroupLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            provisionGroupLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            provisionGroupLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            provisionGroupLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             provisionGroupLayout.BackColor = Color.FromArgb(21, 33, 46);
             provisionGroup.Controls.Add(provisionGroupLayout);
 
             var provisionButtonsPanel = new FlowLayoutPanel();
-            provisionButtonsPanel.Dock = DockStyle.Fill;
+            provisionButtonsPanel.Dock = DockStyle.Top;
+            provisionButtonsPanel.AutoSize = true;
+            provisionButtonsPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
             provisionButtonsPanel.WrapContents = true;
             provisionButtonsPanel.AutoScroll = false;
-            provisionButtonsPanel.Padding = new Padding(0, 4, 0, 0);
+            provisionButtonsPanel.Padding = new Padding(0, 6, 0, 2);
             provisionButtonsPanel.BackColor = Color.FromArgb(21, 33, 46);
-            provisionGroupLayout.Controls.Add(provisionButtonsPanel, 0, 2);
+            provisionGroupLayout.Controls.Add(provisionButtonsPanel, 0, 3);
 
             var runtimeButtonsPanel = new FlowLayoutPanel();
-            runtimeButtonsPanel.Dock = DockStyle.Fill;
+            runtimeButtonsPanel.Dock = DockStyle.Top;
+            runtimeButtonsPanel.AutoSize = true;
+            runtimeButtonsPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
             runtimeButtonsPanel.WrapContents = true;
-            runtimeButtonsPanel.Padding = new Padding(0, 8, 0, 0);
+            runtimeButtonsPanel.Padding = new Padding(0, 4, 0, 0);
+            runtimeButtonsPanel.Margin = new Padding(0);
             runtimeButtonsPanel.BackColor = Color.FromArgb(21, 33, 46);
             runtimeGroup.Controls.Add(runtimeButtonsPanel);
 
             var utilityButtonsPanel = new FlowLayoutPanel();
-            utilityButtonsPanel.Dock = DockStyle.Fill;
+            utilityButtonsPanel.Dock = DockStyle.Top;
+            utilityButtonsPanel.AutoSize = true;
+            utilityButtonsPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
             utilityButtonsPanel.WrapContents = true;
-            utilityButtonsPanel.Padding = new Padding(0, 8, 0, 0);
+            utilityButtonsPanel.Padding = new Padding(0, 6, 0, 0);
+            utilityButtonsPanel.Margin = new Padding(0);
             utilityButtonsPanel.BackColor = Color.FromArgb(21, 33, 46);
             utilityGroup.Controls.Add(utilityButtonsPanel);
 
@@ -564,6 +596,7 @@ namespace WindroseServerManager.Desktop
             warningsGroup.Dock = DockStyle.Fill;
             warningsGroup.Margin = new Padding(0);
             ((ThemedGroupBox)warningsGroup).TitleLeftInset = 42;
+            warningsGroup.Visible = false;
             warningsListBox = new ListBox();
             warningsListBox.Dock = DockStyle.Fill;
             warningsGroup.Controls.Add(warningsListBox);
@@ -574,6 +607,7 @@ namespace WindroseServerManager.Desktop
             toggleWarningsButton.Width = 26;
             toggleWarningsButton.Height = 24;
             toggleWarningsButton.Anchor = AnchorStyles.Top | AnchorStyles.Left;
+            toggleWarningsButton.Visible = false;
             warningsGroup.Controls.Add(toggleWarningsButton);
 
             Action positionWarningsToggle = delegate
@@ -584,14 +618,14 @@ namespace WindroseServerManager.Desktop
             warningsGroup.Resize += delegate { positionWarningsToggle(); };
             positionWarningsToggle();
 
-            var warningsCollapsed = false;
+            var warningsCollapsed = true;
             var warningsExpandedHeight = 150F;
-            var manualWarningsCollapsed = false;
+            var manualWarningsCollapsed = true;
             Action<bool> setWarningsCollapsed = delegate(bool collapsed)
             {
                 warningsCollapsed = collapsed;
                 warningsListBox.Visible = !collapsed;
-                leftLayout.RowStyles[0].Height = collapsed ? 34F : warningsExpandedHeight;
+                leftLayout.RowStyles[0].Height = 0F;
                 toggleWarningsButton.Text = collapsed ? "+" : "-";
                 positionWarningsToggle();
             };
@@ -600,7 +634,7 @@ namespace WindroseServerManager.Desktop
                 manualWarningsCollapsed = !warningsCollapsed;
                 setWarningsCollapsed(manualWarningsCollapsed);
             };
-            setWarningsCollapsed(false);
+            setWarningsCollapsed(true);
 
             Action updateResponsiveShellLayout = delegate
             {
@@ -610,8 +644,8 @@ namespace WindroseServerManager.Desktop
                 root.Padding = veryCompactShell ? new Padding(10) : (compactShell ? new Padding(12) : new Padding(16));
                 root.RowStyles[1].Height = veryCompactShell ? 30F : 34F;
 
-                warningsExpandedHeight = veryCompactShell ? 72F : (compactShell ? 104F : 150F);
-                setWarningsCollapsed(manualWarningsCollapsed || compactShell);
+                warningsExpandedHeight = veryCompactShell ? 56F : (compactShell ? 72F : 96F);
+                setWarningsCollapsed(true);
             };
 
             Resize += delegate { updateResponsiveShellLayout(); };
@@ -1738,69 +1772,139 @@ namespace WindroseServerManager.Desktop
 
             configureTabScrollRange(rconScrollPanel, rconRootLayout);
 
-            var steamCmdPanel = new FlowLayoutPanel();
-            steamCmdPanel.Dock = DockStyle.Fill;
-            steamCmdPanel.WrapContents = false;
+            var steamCmdPanel = new TableLayoutPanel();
+            steamCmdPanel.Dock = DockStyle.Top;
+            steamCmdPanel.AutoSize = true;
+            steamCmdPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            steamCmdPanel.ColumnCount = 4;
+            steamCmdPanel.RowCount = 1;
+            steamCmdPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            steamCmdPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            steamCmdPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            steamCmdPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            steamCmdPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             steamCmdPanel.BackColor = Color.FromArgb(21, 33, 46);
+            steamCmdPanel.Padding = new Padding(0, 4, 0, 2);
             provisionGroupLayout.Controls.Add(steamCmdPanel, 0, 0);
 
             var steamCmdLabel = new Label();
             steamCmdLabel.Text = "SteamCMD:";
             steamCmdLabel.AutoSize = true;
-            steamCmdLabel.Padding = new Padding(0, 8, 0, 0);
-            steamCmdPanel.Controls.Add(steamCmdLabel);
+            steamCmdLabel.TextAlign = ContentAlignment.MiddleLeft;
+            steamCmdLabel.Dock = DockStyle.Fill;
+            steamCmdPanel.Controls.Add(steamCmdLabel, 0, 0);
 
             steamCmdPathTextBox = new TextBox();
-            steamCmdPathTextBox.Width = 156;
-            steamCmdPanel.Controls.Add(steamCmdPathTextBox);
+            steamCmdPathTextBox.Dock = DockStyle.Fill;
+            steamCmdPanel.Controls.Add(steamCmdPathTextBox, 1, 0);
 
             browseSteamCmdButton = new Button();
             browseSteamCmdButton.Text = "Browse SteamCMD Folder";
-            browseSteamCmdButton.Width = 170;
+            browseSteamCmdButton.AutoSize = false;
+            browseSteamCmdButton.Width = 210;
+            browseSteamCmdButton.Margin = new Padding(8, 0, 0, 0);
             browseSteamCmdButton.Click += delegate { BrowseForSteamCmd(); };
-            steamCmdPanel.Controls.Add(browseSteamCmdButton);
+            steamCmdPanel.Controls.Add(browseSteamCmdButton, 2, 0);
 
-            openSteamCmdGuideButton = new Button();
-            openSteamCmdGuideButton.Text = "Setup Guide";
-            openSteamCmdGuideButton.Width = 110;
-            openSteamCmdGuideButton.Click += delegate { OpenUrl("https://playwindrose.com/dedicated-server-guide/"); };
-
-            var installDirPanel = new FlowLayoutPanel();
-            installDirPanel.Dock = DockStyle.Fill;
-            installDirPanel.WrapContents = false;
+            var installDirPanel = new TableLayoutPanel();
+            installDirPanel.Dock = DockStyle.Top;
+            installDirPanel.AutoSize = true;
+            installDirPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            installDirPanel.ColumnCount = 3;
+            installDirPanel.RowCount = 1;
+            installDirPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            installDirPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            installDirPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            installDirPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             installDirPanel.BackColor = Color.FromArgb(21, 33, 46);
+            installDirPanel.Padding = new Padding(0, 4, 0, 2);
             provisionGroupLayout.Controls.Add(installDirPanel, 0, 1);
 
             var installDirLabel = new Label();
             installDirLabel.Text = "Install Dir:";
             installDirLabel.AutoSize = true;
-            installDirLabel.Padding = new Padding(0, 8, 0, 0);
-            installDirPanel.Controls.Add(installDirLabel);
+            installDirLabel.TextAlign = ContentAlignment.MiddleLeft;
+            installDirLabel.Dock = DockStyle.Fill;
+            installDirPanel.Controls.Add(installDirLabel, 0, 0);
 
             installDirTextBox = new TextBox();
-            installDirTextBox.Width = 272;
-            installDirPanel.Controls.Add(installDirTextBox);
+            installDirTextBox.Dock = DockStyle.Fill;
+            installDirPanel.Controls.Add(installDirTextBox, 1, 0);
 
             browseInstallDirButton = new Button();
             browseInstallDirButton.Text = "Browse Install Folder";
-            browseInstallDirButton.Width = 156;
+            browseInstallDirButton.AutoSize = false;
+            browseInstallDirButton.Width = 178;
+            browseInstallDirButton.Margin = new Padding(8, 0, 0, 0);
             browseInstallDirButton.Click += delegate { BrowseForInstallDirectory(); };
-            installDirPanel.Controls.Add(browseInstallDirButton);
+            installDirPanel.Controls.Add(browseInstallDirButton, 2, 0);
 
-            Action layoutProvisionRows = delegate
-            {
-                var steamReserved = steamCmdLabel.PreferredWidth + browseSteamCmdButton.Width
-                    + steamCmdLabel.Margin.Horizontal + browseSteamCmdButton.Margin.Horizontal + 26;
-                steamCmdPathTextBox.Width = Math.Max(100, steamCmdPanel.ClientSize.Width - steamReserved);
+            var serverUpdateInfoPanel = new TableLayoutPanel();
+            serverUpdateInfoPanel.Dock = DockStyle.Fill;
+            serverUpdateInfoPanel.ColumnCount = 2;
+            serverUpdateInfoPanel.RowCount = 1;
+            serverUpdateInfoPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            serverUpdateInfoPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            serverUpdateInfoPanel.BackColor = Color.FromArgb(21, 33, 46);
+            serverUpdateInfoPanel.AutoSize = true;
+            serverUpdateInfoPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            serverUpdateInfoPanel.Margin = new Padding(0, 4, 0, 0);
+            provisionGroupLayout.Controls.Add(serverUpdateInfoPanel, 0, 2);
 
-                var installReserved = installDirLabel.PreferredWidth + browseInstallDirButton.Width
-                    + installDirLabel.Margin.Horizontal + browseInstallDirButton.Margin.Horizontal + 26;
-                installDirTextBox.Width = Math.Max(100, installDirPanel.ClientSize.Width - installReserved);
-            };
-            steamCmdPanel.Resize += delegate { layoutProvisionRows(); };
-            installDirPanel.Resize += delegate { layoutProvisionRows(); };
-            provisionGroupLayout.Resize += delegate { layoutProvisionRows(); };
-            Load += delegate { layoutProvisionRows(); };
+            var serverUpdateLabelsPanel = new TableLayoutPanel();
+            serverUpdateLabelsPanel.Dock = DockStyle.Fill;
+            serverUpdateLabelsPanel.ColumnCount = 1;
+            serverUpdateLabelsPanel.RowCount = 2;
+            serverUpdateLabelsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            serverUpdateLabelsPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            serverUpdateLabelsPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            serverUpdateLabelsPanel.BackColor = Color.FromArgb(21, 33, 46);
+            serverUpdateLabelsPanel.AutoSize = true;
+            serverUpdateLabelsPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            serverUpdateInfoPanel.Controls.Add(serverUpdateLabelsPanel, 0, 0);
+
+            var serverVersionLinePanel = new FlowLayoutPanel();
+            serverVersionLinePanel.Dock = DockStyle.Top;
+            serverVersionLinePanel.AutoSize = true;
+            serverVersionLinePanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            serverVersionLinePanel.WrapContents = true;
+            serverVersionLinePanel.Margin = new Padding(0);
+            serverVersionLinePanel.Padding = new Padding(0);
+            serverVersionLinePanel.BackColor = Color.FromArgb(21, 33, 46);
+            serverUpdateLabelsPanel.Controls.Add(serverVersionLinePanel, 0, 0);
+
+            installedServerVersionLabel = new Label();
+            installedServerVersionLabel.AutoSize = true;
+            installedServerVersionLabel.Text = "Installed: not detected";
+            installedServerVersionLabel.TextAlign = ContentAlignment.TopLeft;
+            installedServerVersionLabel.Padding = new Padding(0, 2, 12, 0);
+            serverVersionLinePanel.Controls.Add(installedServerVersionLabel);
+
+            latestServerVersionLabel = new Label();
+            latestServerVersionLabel.AutoSize = true;
+            latestServerVersionLabel.Text = "Latest: not checked";
+            latestServerVersionLabel.TextAlign = ContentAlignment.TopLeft;
+            latestServerVersionLabel.Padding = new Padding(0, 2, 0, 0);
+            serverVersionLinePanel.Controls.Add(latestServerVersionLabel);
+
+            serverUpdateSummaryLabel = new Label();
+            serverUpdateSummaryLabel.AutoSize = true;
+            serverUpdateSummaryLabel.Dock = DockStyle.Top;
+            serverUpdateSummaryLabel.Text = "Status: Server update status not checked.";
+            serverUpdateSummaryLabel.TextAlign = ContentAlignment.TopLeft;
+            serverUpdateSummaryLabel.Padding = new Padding(0, 2, 0, 0);
+            serverUpdateSummaryLabel.MaximumSize = new Size(520, 0);
+            serverUpdateLabelsPanel.Controls.Add(serverUpdateSummaryLabel, 0, 1);
+
+            checkServerUpdatesButton = new Button();
+            checkServerUpdatesButton.Text = "Check Latest Version";
+            checkServerUpdatesButton.Width = 156;
+            checkServerUpdatesButton.Height = 30;
+            checkServerUpdatesButton.Margin = new Padding(12, 12, 0, 0);
+            checkServerUpdatesButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            checkServerUpdatesButton.Click += delegate { BeginServerUpdateCheck(true); };
+            serverUpdateInfoPanel.Controls.Add(checkServerUpdatesButton, 1, 0);
+
 
             openInstallDirButton = new Button();
             openInstallDirButton.Text = "Open Install Folder";
@@ -1830,6 +1934,7 @@ namespace WindroseServerManager.Desktop
             updateServerButton.Width = 136;
             updateServerButton.Click += delegate { RunSteamCmd(true); };
             provisionButtonsPanel.Controls.Add(updateServerButton);
+            SyncGroupBoxHeight(provisionGroup, provisionGroupLayout);
 
             deleteServerButton = new Button();
             deleteServerButton.Text = "Delete Server";
@@ -1932,8 +2037,8 @@ namespace WindroseServerManager.Desktop
             openRootButton.Width = 120;
             openRootButton.Click += delegate { OpenLoadedRoot(); };
             utilityButtonsPanel.Controls.Add(openRootButton);
-
-            utilityButtonsPanel.Controls.Add(openSteamCmdGuideButton);
+            SyncGroupBoxHeight(runtimeGroup, runtimeButtonsPanel);
+            SyncGroupBoxHeight(utilityGroup, utilityButtonsPanel);
 
             Action applyTopHeaderLayout = delegate
             {
@@ -1946,32 +2051,19 @@ namespace WindroseServerManager.Desktop
                 positionThemeControls();
 
                 appVersionPanel.WrapContents = compactHeader;
-                appVersionPanel.Height = compactHeader ? 56 : 30;
-                pathPanel.WrapContents = compactHeader;
-                pathPanel.SetFlowBreak(pathTextBox, compactHeader);
-                pathPanel.Height = compactHeader ? 72 : 36;
-                browseButton.Width = compactHeader ? 100 : 90;
-                loadButton.Width = compactHeader ? 100 : 110;
+                appVersionPanel.Height = compactHeader ? 46 : 28;
+                pathPanel.Visible = false;
+                pathPanel.Height = 0;
 
                 serverMetaPanel.WrapContents = compactHeader;
-                serverMetaPanel.Height = compactHeader ? 52 : 28;
+                serverMetaPanel.Height = compactHeader ? 40 : 22;
 
-                steamCmdPanel.WrapContents = veryCompactHeader;
-                steamCmdPanel.Height = veryCompactHeader ? 60 : 34;
-                installDirPanel.WrapContents = veryCompactHeader;
-                installDirPanel.Height = veryCompactHeader ? 60 : 34;
-                provisionGroupLayout.RowStyles[0].Height = veryCompactHeader ? 60F : 34F;
-                provisionGroupLayout.RowStyles[1].Height = veryCompactHeader ? 60F : 34F;
-                actionGroupsPanel.Height = compactHeader ? 188 : 164;
-                actionGroupsPanel.ColumnStyles[0].Width = 44F;
-                actionGroupsPanel.ColumnStyles[1].Width = 24F;
-                actionGroupsPanel.ColumnStyles[2].Width = 32F;
-                actionGroupsPanel.SetColumnSpan(provisionGroup, 1);
+                actionGroupsPanel.ColumnStyles[0].Width = compactHeader ? 68F : 70F;
+                actionGroupsPanel.ColumnStyles[1].Width = compactHeader ? 32F : 30F;
 
-                appVersionPanel.Location = new Point(0, subtitleLabel.Bottom + 8);
-                pathPanel.Location = new Point(0, appVersionPanel.Bottom + 8);
-                serverMetaPanel.Location = new Point(0, pathPanel.Bottom + 8);
-                actionGroupsPanel.Location = new Point(0, serverMetaPanel.Bottom + 10);
+                appVersionPanel.Location = new Point(0, subtitleLabel.Bottom + 4);
+                serverMetaPanel.Location = new Point(0, appVersionPanel.Bottom + 4);
+                actionGroupsPanel.Location = new Point(0, serverMetaPanel.Bottom + 4);
 
                 var rightEdge = topHeaderPanel.ClientSize.Width - 8;
                 var availableWidth = Math.Max(340, rightEdge);
@@ -1979,22 +2071,20 @@ namespace WindroseServerManager.Desktop
                 pathPanel.Width = Math.Max(340, availableWidth - pathPanel.Left);
                 serverMetaPanel.Width = Math.Max(340, availableWidth - serverMetaPanel.Left);
                 actionGroupsPanel.Width = Math.Max(340, availableWidth - actionGroupsPanel.Left);
+                serverUpdateSummaryLabel.MaximumSize = new Size(Math.Max(280, (int)(actionGroupsPanel.Width * 0.52F)), 0);
 
-                if (compactHeader)
-                {
-                    pathTextBox.Width = Math.Max(180, pathPanel.ClientSize.Width - 8);
-                }
-                else
-                {
-                    var pathReservedWidth = browseButton.Width + loadButton.Width
-                        + browseButton.Margin.Horizontal + loadButton.Margin.Horizontal + 24;
-                    pathTextBox.Width = Math.Max(140, pathPanel.ClientSize.Width - pathReservedWidth);
-                }
+                provisionGroup.PerformLayout();
+                actionsColumnPanel.PerformLayout();
+                runtimeGroup.PerformLayout();
+                utilityGroup.PerformLayout();
+                var desiredActionHeight = Math.Max(
+                    provisionGroup.Height,
+                    Math.Max(actionsColumnPanel.Height, runtimeGroup.Height + utilityGroup.Height + runtimeGroup.Margin.Bottom));
+                actionGroupsPanel.Height = Math.Max(compactHeader ? 156 : 144, desiredActionHeight + actionGroupsPanel.Padding.Bottom + 2);
 
                 appUpdateStatusLabel.MaximumSize = new Size(Math.Max(180, appVersionPanel.ClientSize.Width - appVersionLabel.Width - appUpdateButton.Width - 48), 0);
 
-                layoutProvisionRows();
-                topHeaderPanel.Height = actionGroupsPanel.Bottom + 12;
+                topHeaderPanel.Height = actionGroupsPanel.Bottom + 8;
             };
 
             Resize += delegate { applyTopHeaderLayout(); };
@@ -2112,6 +2202,7 @@ namespace WindroseServerManager.Desktop
                 RefreshModsProviderUi();
                 LoadRconSettingsIntoUi();
                 RefreshRconStatusUi();
+                RefreshServerVersionInfo();
                 UpdateAppVersionUi();
                 BeginUpdateCheck(false);
                 TryAutoLoadLastServer();

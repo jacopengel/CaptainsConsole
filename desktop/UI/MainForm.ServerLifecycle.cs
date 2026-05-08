@@ -304,6 +304,7 @@ namespace WindroseServerManager.Desktop
             var withinStartupWindow = isServerStarting && serverStartUtc.HasValue && DateTime.UtcNow - serverStartUtc.Value < TimeSpan.FromSeconds(8);
             var taskRunning = managedTaskProcess != null && !managedTaskProcess.HasExited;
             var provisioningBusy = taskRunning || isAutomaticProvisioning;
+            var steamCmdConfigured = File.Exists(Path.Combine(steamCmdPathTextBox.Text.Trim(), "steamcmd.exe"));
 
             if (running)
             {
@@ -368,7 +369,9 @@ namespace WindroseServerManager.Desktop
             installDirTextBox.Enabled = !provisioningBusy;
             steamCmdPathTextBox.Enabled = !provisioningBusy;
             installServerButton.Enabled = !provisioningBusy;
-            updateServerButton.Enabled = !provisioningBusy;
+            updateServerButton.Enabled = !provisioningBusy && !serverUpdateCheckInProgress && serverUpdateAvailable;
+            updateServerButton.Text = serverUpdateAvailable ? "Update Available" : "Update Windrose";
+            checkServerUpdatesButton.Enabled = !provisioningBusy && !serverUpdateCheckInProgress;
             installSteamCmdButton.Enabled = !provisioningBusy;
             deleteServerButton.Enabled = !provisioningBusy && !(managedServerProcess != null && !managedServerProcess.HasExited);
             backupServerButton.Enabled = !provisioningBusy && currentState != null && Directory.Exists(currentState.ServerRoot);
@@ -442,6 +445,232 @@ namespace WindroseServerManager.Desktop
             viewRconLicenseButton.Enabled = true;
             SchedulePlayerCountRefresh(runningSignal);
             RefreshRconStatusUi();
+            RefreshServerVersionInfoUi();
+        }
+
+        private void RefreshServerVersionInfo()
+        {
+            var serverRoot = GetCurrentServerRoot();
+            installedServerVersionDisplay = ReadInstalledServerVersion(serverRoot);
+
+            if (string.IsNullOrWhiteSpace(installedServerVersionDisplay))
+            {
+                installedServerVersionDisplay = "not detected";
+            }
+
+            if (string.IsNullOrWhiteSpace(latestServerVersionDisplay))
+            {
+                latestServerVersionDisplay = "not checked";
+            }
+
+            if (string.IsNullOrWhiteSpace(serverUpdateSummaryMessage))
+            {
+                serverUpdateSummaryMessage = "Server update status not checked.";
+            }
+
+            RefreshServerVersionInfoUi();
+        }
+
+        private void RefreshServerVersionInfoUi()
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke((MethodInvoker)RefreshServerVersionInfoUi);
+                return;
+            }
+
+            installedServerVersionLabel.Text = "Installed: " + (string.IsNullOrWhiteSpace(installedServerVersionDisplay) ? "not detected" : installedServerVersionDisplay);
+            latestServerVersionLabel.Text = "Latest: " + (serverUpdateCheckInProgress ? "checking..." : (string.IsNullOrWhiteSpace(latestServerVersionDisplay) ? "not checked" : latestServerVersionDisplay));
+            serverUpdateSummaryLabel.Text = "Status: " + (serverUpdateCheckInProgress ? "checking latest official Windrose version..." : (string.IsNullOrWhiteSpace(serverUpdateSummaryMessage) ? "Server update status not checked." : serverUpdateSummaryMessage));
+            checkServerUpdatesButton.Text = serverUpdateCheckInProgress ? "Checking..." : "Check Latest Version";
+        }
+
+        private void BeginServerUpdateCheck(bool userInitiated)
+        {
+            if (serverUpdateCheckInProgress)
+            {
+                return;
+            }
+
+            RefreshServerVersionInfo();
+            serverUpdateCheckInProgress = true;
+            latestServerVersionDisplay = "checking...";
+            serverUpdateSummaryMessage = "Checking latest official Windrose version...";
+            RefreshServerVersionInfoUi();
+            UpdateProcessUi();
+
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    var latestVersionText = FetchLatestOfficialWindroseVersion();
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        serverUpdateCheckInProgress = false;
+                        latestServerVersionDisplay = string.IsNullOrWhiteSpace(latestVersionText) ? "not found" : latestVersionText;
+                        serverUpdateAvailable =
+                            !string.IsNullOrWhiteSpace(installedServerVersionDisplay)
+                            && !string.Equals(installedServerVersionDisplay, "not detected", StringComparison.OrdinalIgnoreCase)
+                            && !string.IsNullOrWhiteSpace(latestVersionText)
+                            && !string.Equals(
+                                NormalizeWindroseVersion(installedServerVersionDisplay),
+                                NormalizeWindroseVersion(latestVersionText),
+                                StringComparison.OrdinalIgnoreCase);
+
+                        if (string.IsNullOrWhiteSpace(latestVersionText))
+                        {
+                            serverUpdateSummaryMessage = "Could not read the latest official Windrose version.";
+                        }
+                        else if (string.IsNullOrWhiteSpace(installedServerVersionDisplay) || string.Equals(installedServerVersionDisplay, "not detected", StringComparison.OrdinalIgnoreCase))
+                        {
+                            serverUpdateSummaryMessage = "Latest official version found, but installed server version is unavailable locally.";
+                        }
+                        else if (serverUpdateAvailable)
+                        {
+                            serverUpdateSummaryMessage = "Update available. Installed " + installedServerVersionDisplay + ", latest " + latestServerVersionDisplay + ".";
+                        }
+                        else
+                        {
+                            serverUpdateSummaryMessage = "Installed Windrose server version is up to date.";
+                        }
+
+                        RefreshServerVersionInfo();
+                        UpdateProcessUi();
+
+                        if (userInitiated)
+                        {
+                            if (string.IsNullOrWhiteSpace(latestVersionText))
+                            {
+                                SetStatus("Could not read the latest official Windrose version.", true);
+                            }
+                            else if (serverUpdateAvailable)
+                            {
+                                SetStatus("A newer Windrose server build is available.", false);
+                            }
+                            else
+                            {
+                                SetStatus("Windrose server build check completed.", false);
+                            }
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        serverUpdateCheckInProgress = false;
+                        latestServerVersionDisplay = "check failed";
+                        serverUpdateAvailable = false;
+                        serverUpdateSummaryMessage = "Server update check failed.";
+                        RefreshServerVersionInfoUi();
+                        UpdateProcessUi();
+                        if (userInitiated)
+                        {
+                            SetStatus("Server update check failed: " + ex.Message, true);
+                        }
+                    });
+                }
+            });
+        }
+
+        private static string FetchLatestOfficialWindroseVersion()
+        {
+            var headers = new Dictionary<string, string>
+            {
+                { "Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" }
+            };
+            var urls = new[]
+            {
+                WindroseDedicatedServerGuideUrl,
+                WindroseDedicatedServerGuideFallbackUrl
+            };
+            Exception lastException = null;
+
+            foreach (var url in urls)
+            {
+                try
+                {
+                    var contents = DownloadStringFromUrl(url, headers);
+                    var parsedVersion = ParseLatestOfficialWindroseVersion(contents);
+                    if (!string.IsNullOrWhiteSpace(parsedVersion))
+                    {
+                        return parsedVersion;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                }
+            }
+
+            if (lastException != null)
+            {
+                throw lastException;
+            }
+
+            return string.Empty;
+        }
+
+        private static string ParseLatestOfficialWindroseVersion(string contents)
+        {
+            if (string.IsNullOrWhiteSpace(contents))
+            {
+                return string.Empty;
+            }
+
+            var match = Regex.Match(
+                contents,
+                "Game Version:\\s*(?<version>[0-9A-Za-z.\\-]+)",
+                RegexOptions.IgnoreCase);
+            return match.Success ? match.Groups["version"].Value.Trim() : string.Empty;
+        }
+
+        private string ReadInstalledServerVersion(string serverRoot)
+        {
+            var deploymentId = currentState != null && currentState.Server != null && !string.IsNullOrWhiteSpace(currentState.Server.DeploymentId)
+                ? currentState.Server.DeploymentId.Trim()
+                : ReadServerDeploymentId(serverRoot);
+
+            return string.IsNullOrWhiteSpace(deploymentId)
+                ? string.Empty
+                : deploymentId;
+        }
+
+        private static string NormalizeWindroseVersion(string versionText)
+        {
+            if (string.IsNullOrWhiteSpace(versionText))
+            {
+                return string.Empty;
+            }
+
+            return Regex.Replace(versionText.Trim(), "\\s+", string.Empty);
+        }
+
+        private static string ReadServerDeploymentId(string serverRoot)
+        {
+            if (string.IsNullOrWhiteSpace(serverRoot))
+            {
+                return string.Empty;
+            }
+
+            try
+            {
+                var serverDescriptionPath = WindroseRepository.FindServerDescriptionPathOrNull(serverRoot);
+                if (string.IsNullOrWhiteSpace(serverDescriptionPath) || !File.Exists(serverDescriptionPath))
+                {
+                    return string.Empty;
+                }
+
+                var serializer = new JavaScriptSerializer();
+                var document = serializer.Deserialize<ServerDescriptionDocument>(File.ReadAllText(serverDescriptionPath));
+                return document == null || string.IsNullOrWhiteSpace(document.DeploymentId)
+                    ? string.Empty
+                    : document.DeploymentId.Trim();
+            }
+            catch
+            {
+                return string.Empty;
+            }
         }
 
         private void SetServerStateIndicator(string stateText, Color color)
