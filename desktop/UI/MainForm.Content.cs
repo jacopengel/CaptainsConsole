@@ -8,6 +8,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
@@ -2040,6 +2041,7 @@ namespace WindroseServerManager.Desktop
             }
 
             Directory.Move(folderPath, enabledPath);
+            MoveInstalledModManifest(folderPath, enabledPath);
             PopulateModsInfo();
             SetStatus("Enabled mod: " + enabledName, false);
         }
@@ -2069,6 +2071,7 @@ namespace WindroseServerManager.Desktop
             }
 
             Directory.Move(folderPath, disabledPath);
+            MoveInstalledModManifest(folderPath, disabledPath);
             PopulateModsInfo();
             SetStatus("Disabled mod: " + folderName, false);
         }
@@ -2096,6 +2099,7 @@ namespace WindroseServerManager.Desktop
             }
 
             MoveDirectoryToTrash(folderPath);
+            DeleteInstalledModManifest(folderPath);
             PopulateModsInfo();
             SetStatus("Moved mod to trash: " + folderName, false);
         }
@@ -2360,8 +2364,7 @@ namespace WindroseServerManager.Desktop
                 FileName = file.fileName,
                 InstalledUtc = DateTime.UtcNow.ToString("o")
             };
-            var serializer = new JavaScriptSerializer();
-            File.WriteAllText(Path.Combine(targetFolder, "_windrose_mod.json"), serializer.Serialize(manifest));
+            WriteInstalledModManifest(targetFolder, manifest);
 
             try
             {
@@ -2691,18 +2694,151 @@ namespace WindroseServerManager.Desktop
         {
             try
             {
-                var manifestPath = Path.Combine(folderPath, "_windrose_mod.json");
-                if (!File.Exists(manifestPath))
+                var manifestPath = GetInstalledModManifestPath(folderPath);
+                if (File.Exists(manifestPath))
+                {
+                    var serializer = new JavaScriptSerializer();
+                    CleanupLegacyInstalledModManifest(folderPath);
+                    return serializer.Deserialize<InstalledModManifest>(File.ReadAllText(manifestPath));
+                }
+
+                var legacyManifestPath = GetLegacyInstalledModManifestPath(folderPath);
+                if (!File.Exists(legacyManifestPath))
                 {
                     return null;
                 }
 
-                var serializer = new JavaScriptSerializer();
-                return serializer.Deserialize<InstalledModManifest>(File.ReadAllText(manifestPath));
+                var legacySerializer = new JavaScriptSerializer();
+                var manifest = legacySerializer.Deserialize<InstalledModManifest>(File.ReadAllText(legacyManifestPath));
+                if (manifest != null)
+                {
+                    WriteInstalledModManifest(folderPath, manifest);
+                    CleanupLegacyInstalledModManifest(folderPath);
+                }
+
+                return manifest;
             }
             catch
             {
                 return null;
+            }
+        }
+
+        private void WriteInstalledModManifest(string folderPath, InstalledModManifest manifest)
+        {
+            var manifestPath = GetInstalledModManifestPath(folderPath);
+            var manifestDirectory = Path.GetDirectoryName(manifestPath);
+            if (!string.IsNullOrWhiteSpace(manifestDirectory))
+            {
+                Directory.CreateDirectory(manifestDirectory);
+            }
+
+            var serializer = new JavaScriptSerializer();
+            File.WriteAllText(manifestPath, serializer.Serialize(manifest));
+            CleanupLegacyInstalledModManifest(folderPath);
+        }
+
+        private void DeleteInstalledModManifest(string folderPath)
+        {
+            TryDeleteFile(GetInstalledModManifestPath(folderPath));
+            TryDeleteFile(GetLegacyInstalledModManifestPath(folderPath));
+        }
+
+        private void MoveInstalledModManifest(string oldFolderPath, string newFolderPath)
+        {
+            var oldManifestPath = GetInstalledModManifestPath(oldFolderPath);
+            var newManifestPath = GetInstalledModManifestPath(newFolderPath);
+            if (string.Equals(oldManifestPath, newManifestPath, StringComparison.OrdinalIgnoreCase))
+            {
+                CleanupLegacyInstalledModManifest(newFolderPath);
+                return;
+            }
+
+            if (File.Exists(oldManifestPath))
+            {
+                var targetDirectory = Path.GetDirectoryName(newManifestPath);
+                if (!string.IsNullOrWhiteSpace(targetDirectory))
+                {
+                    Directory.CreateDirectory(targetDirectory);
+                }
+
+                if (File.Exists(newManifestPath))
+                {
+                    File.Delete(newManifestPath);
+                }
+
+                File.Move(oldManifestPath, newManifestPath);
+                CleanupLegacyInstalledModManifest(newFolderPath);
+                return;
+            }
+
+            var manifest = ReadInstalledModManifest(newFolderPath);
+            if (manifest != null)
+            {
+                WriteInstalledModManifest(newFolderPath, manifest);
+            }
+
+            CleanupLegacyInstalledModManifest(newFolderPath);
+        }
+
+        private string GetInstalledModManifestPath(string folderPath)
+        {
+            var metadataRoot = GetInstalledModsMetadataRootPath();
+            var folderName = Path.GetFileName(folderPath);
+            var fingerprint = ComputeStablePathHash(Path.GetFullPath(folderPath));
+            return Path.Combine(metadataRoot, folderName + "_" + fingerprint + ".json");
+        }
+
+        private string GetInstalledModsMetadataRootPath()
+        {
+            var modsRoot = GetModsRootPath();
+            var scope = string.IsNullOrWhiteSpace(modsRoot)
+                ? "global"
+                : ComputeStablePathHash(Path.GetFullPath(modsRoot));
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "WindroseCaptainsConsole",
+                "mod-manifests",
+                scope);
+        }
+
+        private string GetLegacyInstalledModManifestPath(string folderPath)
+        {
+            return Path.Combine(folderPath, "_windrose_mod.json");
+        }
+
+        private void CleanupLegacyInstalledModManifest(string folderPath)
+        {
+            TryDeleteFile(GetLegacyInstalledModManifestPath(folderPath));
+        }
+
+        private void TryDeleteFile(string path)
+        {
+            try
+            {
+                if (File.Exists(path))
+                {
+                    File.Delete(path);
+                }
+            }
+            catch
+            {
+            }
+        }
+
+        private string ComputeStablePathHash(string value)
+        {
+            using (var sha1 = SHA1.Create())
+            {
+                var bytes = Encoding.UTF8.GetBytes(value ?? string.Empty);
+                var hash = sha1.ComputeHash(bytes);
+                var builder = new StringBuilder(hash.Length * 2);
+                for (var i = 0; i < hash.Length; i++)
+                {
+                    builder.Append(hash[i].ToString("x2"));
+                }
+
+                return builder.ToString();
             }
         }
 
