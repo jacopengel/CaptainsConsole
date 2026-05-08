@@ -61,6 +61,9 @@ namespace WindroseServerManager.Desktop
             helpToolTip.SetToolTip(startServerButton, "Start the detected Windrose server launch target from inside this app.");
             helpToolTip.SetToolTip(stopServerButton, "Stop the process tree for the server launched by this app.");
             helpToolTip.SetToolTip(restartServerButton, "Restart the detected launch target.");
+            helpToolTip.SetToolTip(appVersionLabel, "Current Captain's Console application version.");
+            helpToolTip.SetToolTip(appUpdateStatusLabel, "Shows whether a newer Captain's Console update is available.");
+            helpToolTip.SetToolTip(appUpdateButton, "Check for a newer Captain's Console build, or launch the downloaded installer when one is available.");
             helpToolTip.SetToolTip(serverStateTextLabel, "Current server lifecycle state shown as Starting, Running, Stopping, or Stopped.");
             helpToolTip.SetToolTip(serverStateDotPanel, "Current server lifecycle state shown as Starting, Running, Stopping, or Stopped.");
             helpToolTip.SetToolTip(clearLogButton, "Clear all captured lines from the Logbook view.");

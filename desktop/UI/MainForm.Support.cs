@@ -372,6 +372,294 @@ namespace WindroseServerManager.Desktop
             SetStatus("RCON integration has been removed from this public build.", true);
         }
 
+        private sealed class UpdateManifest
+        {
+            public string version { get; set; }
+            public string downloadUrl { get; set; }
+            public string installerUrl { get; set; }
+            public string notes { get; set; }
+        }
+
+        private string GetCurrentApplicationVersion()
+        {
+            try
+            {
+                var assemblyVersion = Assembly.GetExecutingAssembly().GetName().Version;
+                if (assemblyVersion != null)
+                {
+                    return assemblyVersion.ToString();
+                }
+            }
+            catch
+            {
+            }
+
+            return "unknown";
+        }
+
+        private void HandleUpdateButtonClick()
+        {
+            if (updateCheckInProgress)
+            {
+                SetStatus("Application update check is already running.", false);
+                return;
+            }
+
+            if (updateAvailable && !string.IsNullOrWhiteSpace(availableUpdateDownloadUrl))
+            {
+                DownloadAndLaunchAvailableUpdate();
+                return;
+            }
+
+            BeginUpdateCheck(true);
+        }
+
+        private void UpdateAppVersionUi()
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke((MethodInvoker)UpdateAppVersionUi);
+                return;
+            }
+
+            appVersionLabel.Text = "Version " + currentApplicationVersion;
+
+            if (updateCheckInProgress)
+            {
+                appUpdateStatusLabel.Text = "Checking for updates...";
+                appUpdateButton.Text = "Checking...";
+                appUpdateButton.Enabled = false;
+                return;
+            }
+
+            if (updateAvailable && !string.IsNullOrWhiteSpace(availableUpdateVersion))
+            {
+                appUpdateStatusLabel.Text = "Update available: " + availableUpdateVersion;
+                appUpdateButton.Text = "Install Update";
+                appUpdateButton.Enabled = true;
+                return;
+            }
+
+            appUpdateButton.Text = "Check Updates";
+            appUpdateButton.Enabled = true;
+
+            if (string.IsNullOrWhiteSpace(GetUpdateFeedUrl()))
+            {
+                appUpdateStatusLabel.Text = "No update feed configured.";
+                return;
+            }
+
+            appUpdateStatusLabel.Text = "You are up to date.";
+        }
+
+        private void BeginUpdateCheck(bool userInitiated)
+        {
+            if (updateCheckInProgress)
+            {
+                return;
+            }
+
+            var feedUrl = GetUpdateFeedUrl();
+            if (string.IsNullOrWhiteSpace(feedUrl))
+            {
+                updateAvailable = false;
+                availableUpdateVersion = string.Empty;
+                availableUpdateDownloadUrl = string.Empty;
+                availableUpdateNotes = string.Empty;
+                UpdateAppVersionUi();
+                if (userInitiated)
+                {
+                    SetStatus("No update feed is configured for this build.", true);
+                }
+                return;
+            }
+
+            updateCheckInProgress = true;
+            UpdateAppVersionUi();
+
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    var manifestJson = DownloadStringFromUrl(feedUrl, null);
+                    var serializer = new JavaScriptSerializer();
+                    var manifest = serializer.Deserialize<UpdateManifest>(manifestJson);
+                    var downloadUrl = string.IsNullOrWhiteSpace(manifest.downloadUrl)
+                        ? (manifest.installerUrl ?? string.Empty)
+                        : manifest.downloadUrl;
+                    var hasNewerVersion = IsRemoteVersionNewer(currentApplicationVersion, manifest.version);
+
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        updateCheckInProgress = false;
+                        updateAvailable = hasNewerVersion && !string.IsNullOrWhiteSpace(downloadUrl);
+                        availableUpdateVersion = manifest.version ?? string.Empty;
+                        availableUpdateDownloadUrl = downloadUrl ?? string.Empty;
+                        availableUpdateNotes = manifest.notes ?? string.Empty;
+                        UpdateAppVersionUi();
+
+                        if (userInitiated)
+                        {
+                            if (updateAvailable)
+                            {
+                                SetStatus("Application update " + availableUpdateVersion + " is available.", false);
+                            }
+                            else
+                            {
+                                SetStatus("Application is already up to date.", false);
+                            }
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        updateCheckInProgress = false;
+                        updateAvailable = false;
+                        availableUpdateVersion = string.Empty;
+                        availableUpdateDownloadUrl = string.Empty;
+                        availableUpdateNotes = string.Empty;
+                        UpdateAppVersionUi();
+                        if (userInitiated)
+                        {
+                            SetStatus("Application update check failed: " + ex.Message, true);
+                        }
+                    });
+                }
+            });
+        }
+
+        private void DownloadAndLaunchAvailableUpdate()
+        {
+            if (string.IsNullOrWhiteSpace(availableUpdateDownloadUrl))
+            {
+                SetStatus("No downloadable installer was provided for this update.", true);
+                return;
+            }
+
+            var message = "Download and launch the installer for version " + availableUpdateVersion + "?";
+            if (!string.IsNullOrWhiteSpace(availableUpdateNotes))
+            {
+                message += Environment.NewLine + Environment.NewLine + availableUpdateNotes;
+            }
+
+            var decision = MessageBox.Show(
+                this,
+                message,
+                AppTitle,
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question);
+            if (decision != DialogResult.Yes)
+            {
+                return;
+            }
+
+            updateCheckInProgress = true;
+            UpdateAppVersionUi();
+            SetStatus("Downloading application update...", false);
+
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    var extension = GetDownloadExtensionFromUrl(availableUpdateDownloadUrl);
+                    var fileName = "WindroseCaptainsConsoleSetup_" + SanitizeFileNameFragment(availableUpdateVersion) + extension;
+                    var destinationPath = Path.Combine(Path.GetTempPath(), fileName);
+                    DownloadFileToPath(availableUpdateDownloadUrl, destinationPath, null);
+
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        updateCheckInProgress = false;
+                        UpdateAppVersionUi();
+                        OpenPathInShell(destinationPath);
+                        SetStatus("Update installer launched. Finish the install when you're ready.", false);
+                    });
+                }
+                catch (Exception ex)
+                {
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        updateCheckInProgress = false;
+                        UpdateAppVersionUi();
+                        SetStatus("Update download failed: " + ex.Message, true);
+                    });
+                }
+            });
+        }
+
+        private static string SanitizeFileNameFragment(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return "latest";
+            }
+
+            var builder = new StringBuilder(value.Length);
+            foreach (var character in value)
+            {
+                builder.Append(char.IsLetterOrDigit(character) || character == '.' || character == '-' || character == '_' ? character : '_');
+            }
+
+            return builder.ToString();
+        }
+
+        private static string GetDownloadExtensionFromUrl(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return ".exe";
+            }
+
+            try
+            {
+                var path = new Uri(url).AbsolutePath;
+                var extension = Path.GetExtension(path);
+                return string.IsNullOrWhiteSpace(extension) ? ".exe" : extension;
+            }
+            catch
+            {
+                return ".exe";
+            }
+        }
+
+        private static bool IsRemoteVersionNewer(string currentVersionText, string remoteVersionText)
+        {
+            Version currentVersion;
+            Version remoteVersion;
+            if (!Version.TryParse(currentVersionText, out currentVersion) || !Version.TryParse(remoteVersionText, out remoteVersion))
+            {
+                return false;
+            }
+
+            return remoteVersion > currentVersion;
+        }
+
+        private static string GetUpdateFeedUrl()
+        {
+            var filePath = ResolveUpdateFeedPath();
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
+            {
+                return string.Empty;
+            }
+
+            var contents = File.ReadAllText(filePath).Trim();
+            return string.IsNullOrWhiteSpace(contents) ? string.Empty : contents;
+        }
+
+        private static string ResolveUpdateFeedPath()
+        {
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            var candidates = new[]
+            {
+                Path.Combine(baseDir, UpdateFeedFileName),
+                Path.GetFullPath(Path.Combine(baseDir, "..", UpdateFeedFileName)),
+                Path.GetFullPath(Path.Combine(baseDir, "..", "..", UpdateFeedFileName))
+            };
+
+            return candidates.FirstOrDefault(File.Exists) ?? string.Empty;
+        }
+
         private static Icon CreateIconFromBitmap(Bitmap sourceBitmap, int iconSize)
         {
             var iconBitmap = new Bitmap(iconSize, iconSize, PixelFormat.Format32bppArgb);

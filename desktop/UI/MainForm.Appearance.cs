@@ -240,6 +240,8 @@ namespace WindroseServerManager.Desktop
             statusLabel.ForeColor = currentThemeColors.StatusForeground;
             titleLabel.ForeColor = currentThemeColors.HeaderAccent;
             subtitleLabel.ForeColor = currentThemeColors.HeaderMutedForeground;
+            appVersionLabel.ForeColor = currentThemeColors.HeaderMutedForeground;
+            appUpdateStatusLabel.ForeColor = currentThemeColors.HeaderForeground;
             ApplyThemeRecursive(this);
             StyleButton(loadButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
             StyleButton(browseButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
@@ -249,6 +251,7 @@ namespace WindroseServerManager.Desktop
             StyleButton(clearLogButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
             StyleButton(exportLogsButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
             StyleButton(applyLogFilterButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
+            StyleButton(appUpdateButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
             StyleButton(deleteServerButton, currentThemeColors.ButtonDanger, currentThemeColors.ButtonText);
             StyleButton(backupServerButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
             StyleButton(restoreFullServerButton, currentThemeColors.ButtonWarning, currentThemeColors.ButtonText);

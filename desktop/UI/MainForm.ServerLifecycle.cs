@@ -599,7 +599,9 @@ namespace WindroseServerManager.Desktop
                     scheduledBackupRetentionNumeric.Value = Math.Min(100, Math.Max(1, prefs.ScheduledFullBackupRetentionCount));
                 }
 
-                zipFullBackupsCheckBox.Checked = prefs.ZipFullServerBackups;
+                zipFullBackupsCheckBox.Checked = json.IndexOf("\"ZipFullServerBackups\"", StringComparison.OrdinalIgnoreCase) >= 0
+                    ? prefs.ZipFullServerBackups
+                    : true;
 
                 if (!string.IsNullOrWhiteSpace(prefs.NextScheduledBackupUtc))
                 {

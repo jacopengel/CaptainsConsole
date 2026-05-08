@@ -26,6 +26,7 @@ namespace WindroseServerManager.Desktop
         private const string ModProviderCurseForge = "CurseForge";
         private const string ModProviderNexusMods = "Nexus Mods";
         private const string EmbeddedAppIconResourceName = "WindroseServerManager.Resources.AppIcon";
+        private const string UpdateFeedFileName = "update-feed-url.txt";
         private const int CurseForgeGameId = 99078;
         private const int SidebarPreferredWidth = 320;
         private const int SteamCmdMissingConfigurationRetryLimit = 2;
@@ -99,6 +100,9 @@ namespace WindroseServerManager.Desktop
         private readonly Label themeLabel;
         private readonly Label titleLabel;
         private readonly Label subtitleLabel;
+        private readonly Label appVersionLabel;
+        private readonly Label appUpdateStatusLabel;
+        private readonly Button appUpdateButton;
         private readonly Panel serverStateDotPanel;
         private readonly ProgressBar provisioningProgressBar;
         private readonly ListBox warningsListBox;
@@ -212,6 +216,12 @@ namespace WindroseServerManager.Desktop
         private DateTime? lastPlayerCountRefreshUtc;
         private string lastKnownPlayerCount = "offline";
         private bool playerCountRefreshBusy;
+        private bool updateCheckInProgress;
+        private bool updateAvailable;
+        private string currentApplicationVersion;
+        private string availableUpdateVersion;
+        private string availableUpdateDownloadUrl;
+        private string availableUpdateNotes;
         private readonly Panel topHeaderPanel;
         private string selectedModsProvider = ModProviderCurseForge;
         private string storedCurseForgeApiKey = string.Empty;
@@ -280,6 +290,12 @@ namespace WindroseServerManager.Desktop
             automaticProvisioningStartedUtc = null;
             currentThemeName = "Windrose";
             currentThemeColors = ThemeColors.Create(currentThemeName);
+            currentApplicationVersion = GetCurrentApplicationVersion();
+            availableUpdateVersion = string.Empty;
+            availableUpdateDownloadUrl = string.Empty;
+            availableUpdateNotes = string.Empty;
+            updateCheckInProgress = false;
+            updateAvailable = false;
 
             var root = new TableLayoutPanel();
             root.Dock = DockStyle.Fill;
@@ -294,7 +310,7 @@ namespace WindroseServerManager.Desktop
             topHeaderPanel = new Panel();
             topHeaderPanel.Dock = DockStyle.Fill;
             topHeaderPanel.AutoScroll = true;
-            topHeaderPanel.Height = 324;
+            topHeaderPanel.Height = 392;
             topHeaderPanel.BackColor = Color.FromArgb(21, 33, 46);
             root.Controls.Add(topHeaderPanel, 0, 0);
 
@@ -312,6 +328,33 @@ namespace WindroseServerManager.Desktop
             subtitleLabel.ForeColor = Color.FromArgb(196, 205, 213);
             subtitleLabel.Location = new Point(2, 40);
             topHeaderPanel.Controls.Add(subtitleLabel);
+
+            var appVersionPanel = new FlowLayoutPanel();
+            appVersionPanel.Location = new Point(0, 74);
+            appVersionPanel.Width = 1230;
+            appVersionPanel.Height = 30;
+            appVersionPanel.WrapContents = false;
+            appVersionPanel.FlowDirection = FlowDirection.LeftToRight;
+            appVersionPanel.BackColor = Color.Transparent;
+            topHeaderPanel.Controls.Add(appVersionPanel);
+
+            appVersionLabel = new Label();
+            appVersionLabel.AutoSize = true;
+            appVersionLabel.Padding = new Padding(0, 6, 12, 0);
+            appVersionLabel.Text = "Version " + currentApplicationVersion;
+            appVersionPanel.Controls.Add(appVersionLabel);
+
+            appUpdateStatusLabel = new Label();
+            appUpdateStatusLabel.AutoSize = true;
+            appUpdateStatusLabel.Padding = new Padding(0, 6, 12, 0);
+            appUpdateStatusLabel.Text = "Updates not checked yet.";
+            appVersionPanel.Controls.Add(appUpdateStatusLabel);
+
+            appUpdateButton = new Button();
+            appUpdateButton.Text = "Check Updates";
+            appUpdateButton.Width = 120;
+            appUpdateButton.Click += delegate { HandleUpdateButtonClick(); };
+            appVersionPanel.Controls.Add(appUpdateButton);
 
             themeLabel = new Label();
             themeLabel.Text = "Theme:";
@@ -344,7 +387,7 @@ namespace WindroseServerManager.Desktop
             positionThemeControls();
 
             var pathPanel = new FlowLayoutPanel();
-            pathPanel.Location = new Point(0, 76);
+            pathPanel.Location = new Point(0, 112);
             pathPanel.Width = 1230;
             pathPanel.Height = 36;
             pathPanel.WrapContents = false;
@@ -369,7 +412,7 @@ namespace WindroseServerManager.Desktop
             pathPanel.Controls.Add(loadButton);
 
             var serverMetaPanel = new FlowLayoutPanel();
-            serverMetaPanel.Location = new Point(0, 120);
+            serverMetaPanel.Location = new Point(0, 156);
             serverMetaPanel.Width = 1230;
             serverMetaPanel.Height = 28;
             serverMetaPanel.WrapContents = false;
@@ -378,7 +421,7 @@ namespace WindroseServerManager.Desktop
             topHeaderPanel.Controls.Add(serverMetaPanel);
 
             var actionGroupsPanel = new TableLayoutPanel();
-            actionGroupsPanel.Location = new Point(0, 156);
+            actionGroupsPanel.Location = new Point(0, 192);
             actionGroupsPanel.Width = 1230;
             actionGroupsPanel.Height = 164;
             actionGroupsPanel.ColumnCount = 3;
@@ -397,6 +440,7 @@ namespace WindroseServerManager.Desktop
             Action layoutHeaderBands = delegate
             {
                 var availableWidth = Math.Max(340, topHeaderPanel.ClientSize.Width - 8);
+                appVersionPanel.Width = Math.Max(340, availableWidth - appVersionPanel.Left);
                 pathPanel.Width = Math.Max(340, availableWidth - pathPanel.Left);
                 serverMetaPanel.Width = Math.Max(340, availableWidth - serverMetaPanel.Left);
                 actionGroupsPanel.Width = Math.Max(340, availableWidth - actionGroupsPanel.Left);
@@ -411,6 +455,8 @@ namespace WindroseServerManager.Desktop
                         + browseButton.Margin.Horizontal + loadButton.Margin.Horizontal + 24;
                     pathTextBox.Width = Math.Max(220, Math.Min(880, pathPanel.ClientSize.Width - pathReservedWidth));
                 }
+
+                appUpdateStatusLabel.MaximumSize = new Size(Math.Max(180, appVersionPanel.ClientSize.Width - appVersionLabel.Width - appUpdateButton.Width - 48), 0);
             };
             topHeaderPanel.Layout += delegate { positionThemeControls(); layoutHeaderBands(); };
             topHeaderPanel.Resize += delegate
@@ -1899,6 +1945,8 @@ namespace WindroseServerManager.Desktop
                 themeComboBox.Width = compactHeader ? 132 : 160;
                 positionThemeControls();
 
+                appVersionPanel.WrapContents = compactHeader;
+                appVersionPanel.Height = compactHeader ? 56 : 30;
                 pathPanel.WrapContents = compactHeader;
                 pathPanel.SetFlowBreak(pathTextBox, compactHeader);
                 pathPanel.Height = compactHeader ? 72 : 36;
@@ -1920,12 +1968,14 @@ namespace WindroseServerManager.Desktop
                 actionGroupsPanel.ColumnStyles[2].Width = 32F;
                 actionGroupsPanel.SetColumnSpan(provisionGroup, 1);
 
-                pathPanel.Location = new Point(0, 76);
-                serverMetaPanel.Location = new Point(0, pathPanel.Bottom + 6);
-                actionGroupsPanel.Location = new Point(0, serverMetaPanel.Bottom + 8);
+                appVersionPanel.Location = new Point(0, subtitleLabel.Bottom + 8);
+                pathPanel.Location = new Point(0, appVersionPanel.Bottom + 8);
+                serverMetaPanel.Location = new Point(0, pathPanel.Bottom + 8);
+                actionGroupsPanel.Location = new Point(0, serverMetaPanel.Bottom + 10);
 
                 var rightEdge = topHeaderPanel.ClientSize.Width - 8;
                 var availableWidth = Math.Max(340, rightEdge);
+                appVersionPanel.Width = Math.Max(340, availableWidth - appVersionPanel.Left);
                 pathPanel.Width = Math.Max(340, availableWidth - pathPanel.Left);
                 serverMetaPanel.Width = Math.Max(340, availableWidth - serverMetaPanel.Left);
                 actionGroupsPanel.Width = Math.Max(340, availableWidth - actionGroupsPanel.Left);
@@ -1940,6 +1990,8 @@ namespace WindroseServerManager.Desktop
                         + browseButton.Margin.Horizontal + loadButton.Margin.Horizontal + 24;
                     pathTextBox.Width = Math.Max(140, pathPanel.ClientSize.Width - pathReservedWidth);
                 }
+
+                appUpdateStatusLabel.MaximumSize = new Size(Math.Max(180, appVersionPanel.ClientSize.Width - appVersionLabel.Width - appUpdateButton.Width - 48), 0);
 
                 layoutProvisionRows();
                 topHeaderPanel.Height = actionGroupsPanel.Bottom + 12;
@@ -2060,6 +2112,8 @@ namespace WindroseServerManager.Desktop
                 RefreshModsProviderUi();
                 LoadRconSettingsIntoUi();
                 RefreshRconStatusUi();
+                UpdateAppVersionUi();
+                BeginUpdateCheck(false);
                 TryAutoLoadLastServer();
                 ApplyNativeControlTheme();
             };
