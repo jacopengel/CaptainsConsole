@@ -75,7 +75,7 @@ namespace WindroseServerManager.Desktop
             helpToolTip.SetToolTip(applyLogFilterButton, "Apply the keyword filter to the Logbook.");
             helpToolTip.SetToolTip(openRootButton, "Open the loaded server folder in Explorer.");
             helpToolTip.SetToolTip(modsProviderComboBox, "Choose which mod platform this tab is currently targeting.");
-            helpToolTip.SetToolTip(modsApiKeyTextBox, "Enter the API key for the selected mod provider. It will be saved in your local app preferences.");
+            helpToolTip.SetToolTip(modsApiKeyTextBox, "Enter the API key for the selected mod provider. For Nexus Mods you can save multiple keys separated by commas or semicolons. Keys are saved locally in your app preferences.");
             helpToolTip.SetToolTip(saveModsApiKeyButton, "Save the API key for the currently selected mod provider.");
             helpToolTip.SetToolTip(openCurseForgeButton, "Open the selected provider's Windrose page in your browser.");
             helpToolTip.SetToolTip(openModsFolderButton, "Open the community-convention ~mods folder for the loaded server root.");
@@ -2437,44 +2437,90 @@ namespace WindroseServerManager.Desktop
             var manifest = ReadInstalledModManifest(folderPath);
             if (manifest == null || manifest.ModId <= 0)
             {
-                SetStatus("Selected mod was not installed from CurseForge by Captain's Console, so update is not available.", true);
+                SetStatus("Selected mod was not installed by Captain's Console from a supported online provider, so update is not available.", true);
                 return;
             }
 
-            string apiKey;
-            if (!TryGetConfiguredCurseForgeApiKey(out apiKey))
+            var provider = GetInstalledModProvider(manifest);
+            if (!string.Equals(provider, selectedModsProvider, StringComparison.OrdinalIgnoreCase))
             {
-                SetStatus(GetCurseForgeDisabledMessage(), true);
+                SetStatus("Selected mod belongs to " + provider + ". Switch the provider selector before updating it.", true);
                 return;
             }
 
             try
             {
-                var serializer = new JavaScriptSerializer();
-                var url = "https://api.curseforge.com/v1/mods/" + manifest.ModId;
-                var json = DownloadCurseForgeJson(apiKey, url);
-                var response = serializer.Deserialize<CurseForgeSingleModResponse>(json);
-                var mod = response != null ? response.data : null;
-                if (mod == null)
+                if (string.Equals(provider, ModProviderNexusMods, StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new InvalidOperationException("CurseForge returned no mod data for mod id " + manifest.ModId + ".");
-                }
+                    var apiKeys = GetConfiguredNexusModsApiKeys();
+                    if (apiKeys.Count == 0)
+                    {
+                        throw new InvalidOperationException("Enter and save at least one Nexus Mods API key first.");
+                    }
 
-                var latestFile = SelectBestDownloadableFile(apiKey, mod);
-                if (latestFile == null || string.IsNullOrWhiteSpace(latestFile.downloadUrl))
+                    var mod = ExecuteAgainstNexusApiKeys(apiKeys, delegate(string apiKey)
+                    {
+                        return FetchNexusModDetails(apiKey, manifest.ModId);
+                    });
+                    if (mod == null)
+                    {
+                        throw new InvalidOperationException("Nexus Mods returned no mod data for mod id " + manifest.ModId + ".");
+                    }
+
+                    var latestFiles = ExecuteAgainstNexusApiKeys(apiKeys, delegate(string apiKey)
+                    {
+                        return FetchNexusModFiles(apiKey, mod.mod_id);
+                    });
+                    var latestFile = SelectBestNexusDownloadableFile(latestFiles);
+                    if (latestFile == null)
+                    {
+                        throw new InvalidOperationException("No downloadable Nexus file was found for this mod.");
+                    }
+
+                    if (manifest.FileId == latestFile.file_id)
+                    {
+                        SetStatus("Selected mod is already up to date.", false);
+                        return;
+                    }
+
+                    InstallNexusModToFolder(mod, folderPath, true);
+                    PopulateModsInfo();
+                    SetStatus("Updated mod: " + mod.name, false);
+                }
+                else
                 {
-                    throw new InvalidOperationException("No downloadable file found for this mod.");
-                }
+                    string apiKey;
+                    if (!TryGetConfiguredCurseForgeApiKey(out apiKey))
+                    {
+                        throw new InvalidOperationException(GetCurseForgeDisabledMessage());
+                    }
 
-                if (manifest.FileId == latestFile.id)
-                {
-                    SetStatus("Selected mod is already up to date.", false);
-                    return;
-                }
+                    var serializer = new JavaScriptSerializer();
+                    var url = "https://api.curseforge.com/v1/mods/" + manifest.ModId;
+                    var json = DownloadCurseForgeJson(apiKey, url);
+                    var response = serializer.Deserialize<CurseForgeSingleModResponse>(json);
+                    var mod = response != null ? response.data : null;
+                    if (mod == null)
+                    {
+                        throw new InvalidOperationException("CurseForge returned no mod data for mod id " + manifest.ModId + ".");
+                    }
 
-                InstallCurseForgeModToFolder(mod, folderPath, true);
-                PopulateModsInfo();
-                SetStatus("Updated mod: " + mod.name, false);
+                    var latestFile = SelectBestDownloadableFile(apiKey, mod);
+                    if (latestFile == null || string.IsNullOrWhiteSpace(latestFile.downloadUrl))
+                    {
+                        throw new InvalidOperationException("No downloadable file found for this mod.");
+                    }
+
+                    if (manifest.FileId == latestFile.id)
+                    {
+                        SetStatus("Selected mod is already up to date.", false);
+                        return;
+                    }
+
+                    InstallCurseForgeModToFolder(mod, folderPath, true);
+                    PopulateModsInfo();
+                    SetStatus("Updated mod: " + mod.name, false);
+                }
             }
             catch (Exception ex)
             {
@@ -2486,8 +2532,10 @@ namespace WindroseServerManager.Desktop
         {
             installedModsListView.Items.Clear();
             var modsRoot = GetModsRootPath();
-            var latestFileIdByModId = new Dictionary<int, int?>();
+            var latestCurseForgeFileIdByModId = new Dictionary<int, int?>();
+            var latestNexusFileIdByModId = new Dictionary<int, int?>();
             var hasCurseForgeApiKey = HasConfiguredCurseForgeApiKey();
+            var hasNexusModsApiKey = HasConfiguredNexusModsApiKey();
 
             if (string.IsNullOrEmpty(modsRoot))
             {
@@ -2505,10 +2553,11 @@ namespace WindroseServerManager.Desktop
                 var folderName = Path.GetFileName(dir);
                 var disabled = folderName.StartsWith("_disabled_", StringComparison.OrdinalIgnoreCase);
                 var manifest = ReadInstalledModManifest(dir);
+                var provider = GetInstalledModProvider(manifest);
                 var source = manifest != null && manifest.ModId > 0
-                    ? ("CurseForge #" + manifest.ModId)
+                    ? (provider + " #" + manifest.ModId)
                     : "Manual";
-                var updateStatus = GetInstalledModUpdateStatus(manifest, latestFileIdByModId);
+                var updateStatus = GetInstalledModUpdateStatus(manifest, latestCurseForgeFileIdByModId, latestNexusFileIdByModId);
                 var modIdText = manifest != null && manifest.ModId > 0
                     ? manifest.ModId.ToString()
                     : "-";
@@ -2554,13 +2603,17 @@ namespace WindroseServerManager.Desktop
                 installedModsListView.Items.Add(item);
             }
 
-            if (!hasCurseForgeApiKey)
+            if (selectedModsProvider == ModProviderNexusMods && !hasNexusModsApiKey)
+            {
+                curseForgeStatusLabel.Text = "Enter and save at least one Nexus Mods API key to enable online Nexus tools.";
+            }
+            else if (selectedModsProvider == ModProviderCurseForge && !hasCurseForgeApiKey)
             {
                 curseForgeStatusLabel.Text = GetCurseForgeDisabledMessage();
             }
             else if (installedModsListView.Items.Count > 0)
             {
-                curseForgeStatusLabel.Text = "CurseForge tools are ready.";
+                curseForgeStatusLabel.Text = selectedModsProvider + " tools are ready.";
             }
 
             if (installedModsListView.Items.Count == 0)
@@ -2575,11 +2628,51 @@ namespace WindroseServerManager.Desktop
             }
         }
 
-        private string GetInstalledModUpdateStatus(InstalledModManifest manifest, Dictionary<int, int?> latestFileIdByModId)
+        private string GetInstalledModUpdateStatus(InstalledModManifest manifest, Dictionary<int, int?> latestCurseForgeFileIdByModId, Dictionary<int, int?> latestNexusFileIdByModId)
         {
             if (manifest == null || manifest.ModId <= 0)
             {
                 return "Manual";
+            }
+
+            var provider = GetInstalledModProvider(manifest);
+            if (string.Equals(provider, ModProviderNexusMods, StringComparison.OrdinalIgnoreCase))
+            {
+                var apiKeys = GetConfiguredNexusModsApiKeys();
+                if (apiKeys.Count == 0)
+                {
+                    return "API unavailable";
+                }
+
+                int? latestNexusFileId;
+                if (!latestNexusFileIdByModId.TryGetValue(manifest.ModId, out latestNexusFileId))
+                {
+                    latestNexusFileId = null;
+                    try
+                    {
+                        var files = ExecuteAgainstNexusApiKeys(apiKeys, delegate(string nexusApiKey)
+                        {
+                            return FetchNexusModFiles(nexusApiKey, manifest.ModId);
+                        });
+                        var latestFile = SelectBestNexusDownloadableFile(files);
+                        if (latestFile != null)
+                        {
+                            latestNexusFileId = latestFile.file_id;
+                        }
+                    }
+                    catch
+                    {
+                    }
+
+                    latestNexusFileIdByModId[manifest.ModId] = latestNexusFileId;
+                }
+
+                if (!latestNexusFileId.HasValue || manifest.FileId <= 0)
+                {
+                    return "Unknown";
+                }
+
+                return manifest.FileId == latestNexusFileId.Value ? "Up to date" : "Update required";
             }
 
             string apiKey;
@@ -2589,7 +2682,7 @@ namespace WindroseServerManager.Desktop
             }
 
             int? latestFileId;
-            if (!latestFileIdByModId.TryGetValue(manifest.ModId, out latestFileId))
+            if (!latestCurseForgeFileIdByModId.TryGetValue(manifest.ModId, out latestFileId))
             {
                 latestFileId = null;
                 try
@@ -2609,7 +2702,7 @@ namespace WindroseServerManager.Desktop
                 {
                 }
 
-                latestFileIdByModId[manifest.ModId] = latestFileId;
+                latestCurseForgeFileIdByModId[manifest.ModId] = latestFileId;
             }
 
             if (!latestFileId.HasValue || manifest.FileId <= 0)
@@ -2691,6 +2784,7 @@ namespace WindroseServerManager.Desktop
 
             var manifest = new InstalledModManifest
             {
+                Provider = ModProviderCurseForge,
                 ModId = mod.id,
                 ModName = mod.name,
                 FileId = file.id,
@@ -2708,6 +2802,527 @@ namespace WindroseServerManager.Desktop
             }
         }
 
+        private void SearchNexusMods(bool resetFilter, bool silent)
+        {
+            var apiKeys = GetConfiguredNexusModsApiKeys();
+            if (apiKeys.Count == 0)
+            {
+                curseForgeStatusLabel.Text = "Enter and save at least one Nexus Mods API key first.";
+                if (!silent)
+                {
+                    SetStatus(curseForgeStatusLabel.Text, true);
+                }
+                return;
+            }
+
+            if (resetFilter)
+            {
+                curseForgeSearchModeComboBox.SelectedIndex = 0;
+                curseForgeSearchTextBox.Text = string.Empty;
+            }
+
+            var searchFilter = curseForgeSearchTextBox.Text.Trim();
+            var searchById = curseForgeSearchModeComboBox.SelectedItem != null
+                && string.Equals(curseForgeSearchModeComboBox.SelectedItem.ToString(), "Mod ID", StringComparison.OrdinalIgnoreCase);
+
+            try
+            {
+                List<NexusModData> mods;
+                if (searchById)
+                {
+                    int modId;
+                    if (!int.TryParse(searchFilter, out modId) || modId <= 0)
+                    {
+                        throw new InvalidOperationException("Enter a valid numeric Nexus Mod ID.");
+                    }
+
+                    var mod = ExecuteAgainstNexusApiKeys(apiKeys, delegate(string apiKey)
+                    {
+                        return FetchNexusModDetails(apiKey, modId);
+                    });
+                    mods = mod == null ? new List<NexusModData>() : new List<NexusModData> { mod };
+                }
+                else if (string.IsNullOrWhiteSpace(searchFilter))
+                {
+                    mods = ExecuteAgainstNexusApiKeys(apiKeys, delegate(string apiKey)
+                    {
+                        return FetchNexusLatestUpdatedMods(apiKey);
+                    });
+                }
+                else
+                {
+                    mods = SearchNexusModsByKeyword(apiKeys, searchFilter);
+                }
+
+                availableModsListView.Items.Clear();
+                foreach (var mod in mods)
+                {
+                    if (mod == null)
+                    {
+                        continue;
+                    }
+
+                    var item = new ListViewItem(string.IsNullOrWhiteSpace(mod.name) ? ("Mod " + mod.mod_id) : mod.name);
+                    item.SubItems.Add(mod.mod_id.ToString());
+                    item.SubItems.Add(string.IsNullOrWhiteSpace(mod.author) ? "Unknown" : mod.author);
+                    item.SubItems.Add(FormatNexusDate(mod.updated_time, mod.updated_timestamp));
+                    item.SubItems.Add(GetNexusLatestFileDisplay(mod));
+                    item.Tag = mod;
+                    availableModsListView.Items.Add(item);
+                }
+
+                curseForgeStatusLabel.Text = searchById
+                    ? (availableModsListView.Items.Count > 0 ? "Found Nexus mod by ID." : "No Nexus mod found for that ID.")
+                    : ("Found " + availableModsListView.Items.Count + " Nexus mod" + (availableModsListView.Items.Count == 1 ? "." : "s."));
+                if (!silent)
+                {
+                    SetStatus("Nexus Mods search completed.", false);
+                }
+            }
+            catch (Exception ex)
+            {
+                curseForgeStatusLabel.Text = "Nexus Mods search failed.";
+                if (!silent)
+                {
+                    SetStatus("Nexus Mods search failed: " + ex.Message, true);
+                }
+            }
+        }
+
+        private void InstallSelectedNexusMod()
+        {
+            if (availableModsListView.SelectedItems.Count == 0)
+            {
+                SetStatus("Select a Nexus mod from available mods first.", true);
+                return;
+            }
+
+            var selected = availableModsListView.SelectedItems[0].Tag as NexusModData;
+            if (selected == null)
+            {
+                SetStatus("Selected Nexus mod details are unavailable.", true);
+                return;
+            }
+
+            try
+            {
+                var modsRoot = GetModsRootPath();
+                if (string.IsNullOrWhiteSpace(modsRoot))
+                {
+                    SetStatus("Load a server root or set an install directory first.", true);
+                    return;
+                }
+
+                Directory.CreateDirectory(modsRoot);
+                var safeName = SanitizeFolderName(selected.name);
+                var targetFolder = Path.Combine(modsRoot, safeName + "_" + selected.mod_id);
+                InstallNexusModToFolder(selected, targetFolder, true);
+                PopulateModsInfo();
+                SetStatus("Installed Nexus mod: " + selected.name, false);
+            }
+            catch (Exception ex)
+            {
+                SetStatus("Install Nexus mod failed: " + ex.Message, true);
+            }
+        }
+
+        private List<NexusModData> SearchNexusModsByKeyword(List<string> apiKeys, string searchFilter)
+        {
+            var gameId = ExecuteAgainstNexusApiKeys(apiKeys, delegate(string apiKey)
+            {
+                return GetNexusGameId(apiKey);
+            });
+
+            if (gameId <= 0)
+            {
+                throw new InvalidOperationException("Could not resolve the Nexus Mods game id for Windrose.");
+            }
+
+            var searchUrl = "https://search.nexusmods.com/mods?terms=" + Uri.EscapeDataString(searchFilter)
+                + "&game_id=" + gameId
+                + "&include_adult=1";
+            var searchJson = DownloadStringFromUrl(searchUrl, null);
+            var serializer = new JavaScriptSerializer();
+            var rawResults = serializer.Deserialize<List<NexusSearchResultData>>(searchJson);
+            var modIds = rawResults == null
+                ? new List<int>()
+                : rawResults
+                    .Where(delegate(NexusSearchResultData result) { return result != null && result.mod_id > 0; })
+                    .Select(delegate(NexusSearchResultData result) { return result.mod_id; })
+                    .Distinct()
+                    .Take(25)
+                    .ToList();
+
+            var mods = new List<NexusModData>();
+            foreach (var modId in modIds)
+            {
+                try
+                {
+                    var mod = ExecuteAgainstNexusApiKeys(apiKeys, delegate(string apiKey)
+                    {
+                        return FetchNexusModDetails(apiKey, modId);
+                    });
+                    if (mod != null)
+                    {
+                        mods.Add(mod);
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            return mods;
+        }
+
+        private T ExecuteAgainstNexusApiKeys<T>(IList<string> apiKeys, Func<string, T> work)
+        {
+            if (apiKeys == null || apiKeys.Count == 0)
+            {
+                throw new InvalidOperationException("No Nexus Mods API keys are configured.");
+            }
+
+            Exception lastError = null;
+            foreach (var apiKey in apiKeys)
+            {
+                try
+                {
+                    return work(apiKey);
+                }
+                catch (Exception ex)
+                {
+                    lastError = ex;
+                }
+            }
+
+            if (lastError != null)
+            {
+                throw lastError;
+            }
+
+            throw new InvalidOperationException("No usable Nexus Mods API key was available.");
+        }
+
+        private string DownloadNexusJson(string apiKey, string url)
+        {
+            var headers = BuildNexusRequestHeaders(apiKey);
+            try
+            {
+                return DownloadStringFromUrl(url, headers);
+            }
+            catch (WebException ex)
+            {
+                throw new InvalidOperationException(GetNexusErrorMessage(ex), ex);
+            }
+        }
+
+        private Dictionary<string, string> BuildNexusRequestHeaders(string apiKey)
+        {
+            var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            headers["apikey"] = apiKey;
+            headers["Application-Name"] = "WindroseCaptainsConsole";
+            headers["Application-Version"] = currentApplicationVersion;
+            headers["Accept"] = "application/json";
+            return headers;
+        }
+
+        private NexusModData FetchNexusModDetails(string apiKey, int modId)
+        {
+            var serializer = new JavaScriptSerializer();
+            var url = "https://api.nexusmods.com/v1/games/" + NexusModsGameDomainName + "/mods/" + modId + ".json";
+            var json = DownloadNexusJson(apiKey, url);
+            return serializer.Deserialize<NexusModData>(json);
+        }
+
+        private List<NexusModData> FetchNexusLatestUpdatedMods(string apiKey)
+        {
+            var serializer = new JavaScriptSerializer();
+            var url = "https://api.nexusmods.com/v1/games/" + NexusModsGameDomainName + "/mods/latest_updated.json";
+            var json = DownloadNexusJson(apiKey, url);
+            var mods = serializer.Deserialize<List<NexusModData>>(json);
+            return mods ?? new List<NexusModData>();
+        }
+
+        private int GetNexusGameId(string apiKey)
+        {
+            var serializer = new JavaScriptSerializer();
+            var url = "https://api.nexusmods.com/v1/games/" + NexusModsGameDomainName + ".json";
+            var json = DownloadNexusJson(apiKey, url);
+            var details = serializer.Deserialize<NexusGameDetails>(json);
+            return details == null ? 0 : details.id;
+        }
+
+        private List<NexusFileData> FetchNexusModFiles(string apiKey, int modId)
+        {
+            var serializer = new JavaScriptSerializer();
+            var url = "https://api.nexusmods.com/v1/games/" + NexusModsGameDomainName + "/mods/" + modId + "/files.json";
+            var json = DownloadNexusJson(apiKey, url);
+            var response = serializer.Deserialize<NexusModFilesResponse>(json);
+            return response != null && response.files != null ? response.files : new List<NexusFileData>();
+        }
+
+        private NexusFileData SelectBestNexusDownloadableFile(List<NexusFileData> files)
+        {
+            if (files == null || files.Count == 0)
+            {
+                return null;
+            }
+
+            return files
+                .Where(delegate(NexusFileData file) { return file != null && file.file_id > 0; })
+                .OrderByDescending(delegate(NexusFileData file) { return file.is_primary ? 1 : 0; })
+                .ThenByDescending(delegate(NexusFileData file) { return GetNexusCategoryPriority(file); })
+                .ThenByDescending(delegate(NexusFileData file) { return file.uploaded_timestamp; })
+                .FirstOrDefault();
+        }
+
+        private int GetNexusCategoryPriority(NexusFileData file)
+        {
+            if (file == null || string.IsNullOrWhiteSpace(file.category_name))
+            {
+                return 0;
+            }
+
+            var categoryName = file.category_name.Trim();
+            if (string.Equals(categoryName, "MAIN", StringComparison.OrdinalIgnoreCase))
+            {
+                return 4;
+            }
+
+            if (string.Equals(categoryName, "UPDATE", StringComparison.OrdinalIgnoreCase))
+            {
+                return 3;
+            }
+
+            if (string.Equals(categoryName, "OPTIONAL", StringComparison.OrdinalIgnoreCase))
+            {
+                return 2;
+            }
+
+            return 1;
+        }
+
+        private NexusDownloadLinkData ResolveNexusDownloadLink(List<string> apiKeys, int modId, NexusFileData file)
+        {
+            if (file == null || file.file_id <= 0 || modId <= 0)
+            {
+                return null;
+            }
+
+            return ExecuteAgainstNexusApiKeys(apiKeys, delegate(string apiKey)
+            {
+                var serializer = new JavaScriptSerializer();
+                var url = "https://api.nexusmods.com/v1/games/" + NexusModsGameDomainName + "/mods/" + modId + "/files/" + file.file_id + "/download_link.json";
+                var json = DownloadNexusJson(apiKey, url);
+                var links = serializer.Deserialize<List<NexusDownloadLinkData>>(json) ?? new List<NexusDownloadLinkData>();
+                var bestLink = links.FirstOrDefault(delegate(NexusDownloadLinkData candidate)
+                {
+                    return candidate != null && !string.IsNullOrWhiteSpace(candidate.URI);
+                });
+                if (bestLink == null)
+                {
+                    throw new InvalidOperationException("Nexus Mods did not return a usable download link for this file.");
+                }
+
+                return bestLink;
+            });
+        }
+
+        private void InstallNexusModToFolder(NexusModData mod, string targetFolder, bool allowOverwrite)
+        {
+            if (mod == null)
+            {
+                throw new ArgumentNullException("mod");
+            }
+
+            var apiKeys = GetConfiguredNexusModsApiKeys();
+            if (apiKeys.Count == 0)
+            {
+                throw new InvalidOperationException("No Nexus Mods API key is configured.");
+            }
+
+            var files = ExecuteAgainstNexusApiKeys(apiKeys, delegate(string apiKey)
+            {
+                return FetchNexusModFiles(apiKey, mod.mod_id);
+            });
+            var file = SelectBestNexusDownloadableFile(files);
+            if (file == null)
+            {
+                throw new InvalidOperationException("No downloadable Nexus file was found for " + mod.name + ".");
+            }
+
+            if (Directory.Exists(targetFolder))
+            {
+                if (!allowOverwrite)
+                {
+                    throw new InvalidOperationException("Target mod folder already exists: " + Path.GetFileName(targetFolder));
+                }
+
+                var overwrite = MessageBox.Show(
+                    this,
+                    "The mod folder already exists. Replace it?\n\n" + targetFolder,
+                    AppTitle,
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button2);
+                if (overwrite != DialogResult.Yes)
+                {
+                    return;
+                }
+
+                MoveDirectoryToTrash(targetFolder);
+            }
+
+            Directory.CreateDirectory(targetFolder);
+
+            var downloadLink = ResolveNexusDownloadLink(apiKeys, mod.mod_id, file);
+            if (downloadLink == null || string.IsNullOrWhiteSpace(downloadLink.URI))
+            {
+                throw new InvalidOperationException("Nexus Mods did not return a usable download link.");
+            }
+
+            var outputExtension = Path.GetExtension(file.file_name);
+            if (string.IsNullOrWhiteSpace(outputExtension))
+            {
+                outputExtension = Path.GetExtension(downloadLink.URI);
+            }
+
+            var tempFile = Path.Combine(Path.GetTempPath(), "windrose-nexus-mod-" + Guid.NewGuid().ToString("N") + outputExtension);
+            DownloadFileToPath(downloadLink.URI, tempFile, null);
+
+            var extension = Path.GetExtension(tempFile);
+            if (string.Equals(extension, ".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                ZipFile.ExtractToDirectory(tempFile, targetFolder);
+            }
+            else
+            {
+                var outputName = !string.IsNullOrWhiteSpace(file.file_name)
+                    ? file.file_name
+                    : Path.GetFileName(tempFile);
+                File.Copy(tempFile, Path.Combine(targetFolder, outputName), true);
+            }
+
+            var manifest = new InstalledModManifest
+            {
+                Provider = ModProviderNexusMods,
+                ModId = mod.mod_id,
+                ModName = mod.name,
+                FileId = file.file_id,
+                FileName = file.file_name,
+                InstalledUtc = DateTime.UtcNow.ToString("o")
+            };
+            WriteInstalledModManifest(targetFolder, manifest);
+
+            try
+            {
+                File.Delete(tempFile);
+            }
+            catch
+            {
+            }
+        }
+
+        private string GetNexusLatestFileDisplay(NexusModData mod)
+        {
+            if (mod == null)
+            {
+                return "(no files)";
+            }
+
+            if (!string.IsNullOrWhiteSpace(mod.version))
+            {
+                return "Version " + mod.version;
+            }
+
+            if (mod.latest_file_update > 0)
+            {
+                return "File " + ConvertUnixTimeToLocalText(mod.latest_file_update);
+            }
+
+            return "Nexus listing";
+        }
+
+        private string FormatNexusDate(string isoDate, long unixTime)
+        {
+            DateTime parsedDate;
+            if (!string.IsNullOrWhiteSpace(isoDate) && DateTime.TryParse(isoDate, out parsedDate))
+            {
+                return parsedDate.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+            }
+
+            if (unixTime > 0)
+            {
+                return ConvertUnixTimeToLocalText(unixTime);
+            }
+
+            return "(unknown)";
+        }
+
+        private string ConvertUnixTimeToLocalText(long unixTime)
+        {
+            var utc = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddSeconds(unixTime);
+            return utc.ToLocalTime().ToString("yyyy-MM-dd HH:mm");
+        }
+
+        private string GetNexusErrorMessage(WebException ex)
+        {
+            var response = ex == null ? null : ex.Response as HttpWebResponse;
+            var responseBody = string.Empty;
+            if (response != null)
+            {
+                try
+                {
+                    using (var stream = response.GetResponseStream())
+                    using (var reader = stream == null ? null : new StreamReader(stream))
+                    {
+                        responseBody = reader == null ? string.Empty : reader.ReadToEnd();
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            var message = string.Empty;
+            if (!string.IsNullOrWhiteSpace(responseBody))
+            {
+                try
+                {
+                    var serializer = new JavaScriptSerializer();
+                    var payload = serializer.Deserialize<Dictionary<string, object>>(responseBody);
+                    object value;
+                    if (payload != null)
+                    {
+                        if (payload.TryGetValue("message", out value) && value != null)
+                        {
+                            message = value.ToString();
+                        }
+                        else if (payload.TryGetValue("error", out value) && value != null)
+                        {
+                            message = value.ToString();
+                        }
+                    }
+                }
+                catch
+                {
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                message = ex == null ? "Unknown Nexus Mods error." : ex.Message;
+            }
+
+            if (response != null && response.StatusCode == HttpStatusCode.Forbidden
+                && message.IndexOf("premium", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return "Nexus Mods rejected the download link request. This usually means the current key is not premium-enabled for direct API downloads.";
+            }
+
+            return message;
+        }
+
         private void RefreshModsProviderUi()
         {
             selectedModsProvider = GetSelectedModsProvider();
@@ -2722,10 +3337,10 @@ namespace WindroseServerManager.Desktop
 
             if (selectedModsProvider == ModProviderNexusMods)
             {
-                curseForgeStatusLabel.Text = HasConfiguredNexusModsApiKey()
-                    ? "Nexus Mods key saved. In-app Nexus search/install is not wired yet."
-                    : "Enter and save a Nexus Mods API key for future Nexus integration.";
-                availableModsListView.Items.Clear();
+                var nexusKeyCount = GetConfiguredNexusModsApiKeys().Count;
+                curseForgeStatusLabel.Text = nexusKeyCount > 0
+                    ? ("Nexus Mods online tools are enabled with " + nexusKeyCount + " saved key" + (nexusKeyCount == 1 ? "." : "s."))
+                    : "Enter and save at least one Nexus Mods API key to enable in-app Nexus search and install.";
             }
             else
             {
@@ -2796,27 +3411,24 @@ namespace WindroseServerManager.Desktop
 
         private bool SelectedModsProviderSupportsSearch()
         {
-            return selectedModsProvider == ModProviderCurseForge && HasConfiguredSelectedModsApiKey();
+            return HasConfiguredSelectedModsApiKey();
         }
 
         private bool SelectedModsProviderSupportsInstall()
         {
-            return selectedModsProvider == ModProviderCurseForge && HasConfiguredSelectedModsApiKey();
+            return HasConfiguredSelectedModsApiKey();
         }
 
         private bool SelectedModsProviderSupportsUpdates()
         {
-            return selectedModsProvider == ModProviderCurseForge && HasConfiguredCurseForgeApiKey();
+            return HasConfiguredSelectedModsApiKey();
         }
 
         private void SearchSelectedModsProvider()
         {
             if (selectedModsProvider == ModProviderNexusMods)
             {
-                curseForgeStatusLabel.Text = HasConfiguredNexusModsApiKey()
-                    ? "Nexus Mods key saved. In-app Nexus search/install is not wired yet."
-                    : "Enter and save a Nexus Mods API key first.";
-                SetStatus(curseForgeStatusLabel.Text, true);
+                SearchNexusMods(false, false);
                 return;
             }
 
@@ -2827,7 +3439,7 @@ namespace WindroseServerManager.Desktop
         {
             if (selectedModsProvider == ModProviderNexusMods)
             {
-                SetStatus("In-app Nexus Mods install is not wired yet. Use Open Nexus Mods for now.", true);
+                InstallSelectedNexusMod();
                 return;
             }
 
@@ -2854,8 +3466,20 @@ namespace WindroseServerManager.Desktop
 
         private bool TryGetConfiguredNexusModsApiKey(out string apiKey)
         {
-            apiKey = storedNexusModsApiKey == null ? string.Empty : storedNexusModsApiKey.Trim();
+            var keys = GetConfiguredNexusModsApiKeys();
+            apiKey = keys.Count > 0 ? keys[0] : string.Empty;
             return !string.IsNullOrWhiteSpace(apiKey);
+        }
+
+        private List<string> GetConfiguredNexusModsApiKeys()
+        {
+            var raw = storedNexusModsApiKey ?? string.Empty;
+            return raw
+                .Split(new[] { ',', ';', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(delegate(string value) { return value == null ? string.Empty : value.Trim(); })
+                .Where(delegate(string value) { return !string.IsNullOrWhiteSpace(value); })
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
         }
 
         private string GetCurseForgeDisabledMessage()
@@ -3109,6 +3733,21 @@ namespace WindroseServerManager.Desktop
             return fileName;
         }
 
+        private string GetInstalledModProvider(InstalledModManifest manifest)
+        {
+            if (manifest == null)
+            {
+                return string.Empty;
+            }
+
+            if (!string.IsNullOrWhiteSpace(manifest.Provider))
+            {
+                return manifest.Provider.Trim();
+            }
+
+            return manifest.ModId > 0 ? ModProviderCurseForge : string.Empty;
+        }
+
         private InstalledModManifest ReadInstalledModManifest(string folderPath)
         {
             try
@@ -3357,11 +3996,56 @@ namespace WindroseServerManager.Desktop
 
         private sealed class InstalledModManifest
         {
+            public string Provider { get; set; }
             public int ModId { get; set; }
             public string ModName { get; set; }
             public int FileId { get; set; }
             public string FileName { get; set; }
             public string InstalledUtc { get; set; }
+        }
+
+        private sealed class NexusGameDetails
+        {
+            public int id { get; set; }
+        }
+
+        private sealed class NexusModData
+        {
+            public int mod_id { get; set; }
+            public string name { get; set; }
+            public string author { get; set; }
+            public string version { get; set; }
+            public string updated_time { get; set; }
+            public long updated_timestamp { get; set; }
+            public long latest_file_update { get; set; }
+        }
+
+        private sealed class NexusSearchResultData
+        {
+            public int mod_id { get; set; }
+        }
+
+        private sealed class NexusModFilesResponse
+        {
+            public List<NexusFileData> files { get; set; }
+        }
+
+        private sealed class NexusFileData
+        {
+            public int file_id { get; set; }
+            public string name { get; set; }
+            public string file_name { get; set; }
+            public string version { get; set; }
+            public string category_name { get; set; }
+            public bool is_primary { get; set; }
+            public long uploaded_timestamp { get; set; }
+        }
+
+        private sealed class NexusDownloadLinkData
+        {
+            public string URI { get; set; }
+            public string name { get; set; }
+            public string short_name { get; set; }
         }
 
         private sealed class InstalledLooseModEntry

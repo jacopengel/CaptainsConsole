@@ -25,6 +25,7 @@ namespace WindroseServerManager.Desktop
         private const string SteamCmdDownloadUrl = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip";
         private const string ModProviderCurseForge = "CurseForge";
         private const string ModProviderNexusMods = "Nexus Mods";
+        private const string NexusModsGameDomainName = "windrose";
         private const string EmbeddedAppIconResourceName = "WindroseServerManager.Resources.AppIcon";
         private const string UpdateFeedFileName = "update-feed-url.txt";
         private const string WindroseDedicatedServerGuideUrl = "https://playwindrose.com/dedicated-server-guide/";
