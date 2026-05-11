@@ -488,7 +488,7 @@ namespace WindroseServerManager.Desktop
             {
                 try
                 {
-                    var manifestJson = DownloadStringFromUrl(feedUrl, null);
+                    var manifestJson = DownloadStringFromUrl(AppendCacheBustQuery(feedUrl), null);
                     var serializer = new JavaScriptSerializer();
                     var manifest = serializer.Deserialize<UpdateManifest>(manifestJson);
                     var downloadUrl = string.IsNullOrWhiteSpace(manifest.downloadUrl)
@@ -719,6 +719,17 @@ namespace WindroseServerManager.Desktop
 
             var contents = File.ReadAllText(filePath).Trim();
             return string.IsNullOrWhiteSpace(contents) ? string.Empty : contents;
+        }
+
+        private static string AppendCacheBustQuery(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return string.Empty;
+            }
+
+            var separator = url.IndexOf('?') >= 0 ? "&" : "?";
+            return url + separator + "_cccb=" + DateTime.UtcNow.Ticks.ToString();
         }
 
         private static string ResolveUpdateFeedPath()

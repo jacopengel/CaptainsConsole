@@ -409,15 +409,12 @@ namespace WindroseServerManager.Desktop
                 .WithTitle(serverName)
                 .WithDescription("Live status panel powered by Captain's Console.")
                 .WithColor(GetDiscordPanelColor())
-                .WithCurrentTimestamp()
-                .WithFooter("Captain's Console must stay open for live Discord updates.");
+                .WithCurrentTimestamp();
 
             builder.AddField("Server State", SafeDiscordFieldValue(serverStateValueLabel.Text), true);
             builder.AddField("Players", SafeDiscordFieldValue(playerCount), true);
             builder.AddField("Uptime", SafeDiscordFieldValue(uptime), true);
-            builder.AddField("Process", SafeDiscordFieldValue(TrimLabelValue(processStatusLabel.Text)), true);
             builder.AddField("World", SafeDiscordFieldValue(currentWorld), true);
-            builder.AddField("Launch Target", SafeDiscordFieldValue(TrimLabelValue(launchTargetLabel.Text)), false);
             return builder.Build();
         }
 
