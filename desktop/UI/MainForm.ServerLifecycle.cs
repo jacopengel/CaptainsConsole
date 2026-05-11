@@ -411,6 +411,18 @@ namespace WindroseServerManager.Desktop
             removeModButton.Enabled = !provisioningBusy && installedModsListView.SelectedItems.Count > 0;
             curseForgeSearchModeComboBox.Enabled = !provisioningBusy && SelectedModsProviderSupportsSearch();
             curseForgeSearchTextBox.Enabled = !provisioningBusy && SelectedModsProviderSupportsSearch();
+            discordBotTokenTextBox.Enabled = !provisioningBusy;
+            discordGuildIdTextBox.Enabled = !provisioningBusy;
+            discordPublicChannelIdTextBox.Enabled = !provisioningBusy;
+            discordAdminChannelIdTextBox.Enabled = !provisioningBusy;
+            discordAdminRoleIdsTextBox.Enabled = !provisioningBusy;
+            discordRefreshSecondsNumeric.Enabled = !provisioningBusy;
+            discordAutoConnectCheckBox.Enabled = !provisioningBusy;
+            saveDiscordSettingsButton.Enabled = !provisioningBusy;
+            connectDiscordButton.Enabled = !provisioningBusy && !discordConnectionBusy;
+            publishDiscordPublicPanelButton.Enabled = !provisioningBusy && discordClient != null && discordClient.ConnectionState == Discord.ConnectionState.Connected;
+            publishDiscordAdminPanelButton.Enabled = !provisioningBusy && discordClient != null && discordClient.ConnectionState == Discord.ConnectionState.Connected;
+            refreshDiscordPanelsButton.Enabled = !provisioningBusy && discordClient != null && discordClient.ConnectionState == Discord.ConnectionState.Connected && !discordPanelsBusy;
             var hasServerRoot = !string.IsNullOrWhiteSpace(GetCurrentServerRoot());
             var hasRconSettings = !string.IsNullOrWhiteSpace(GetRconSettingsPath()) && File.Exists(GetRconSettingsPath());
             var hasInstalledRconDll = !string.IsNullOrWhiteSpace(GetRconVersionDllPath()) && File.Exists(GetRconVersionDllPath());
@@ -807,6 +819,24 @@ namespace WindroseServerManager.Desktop
 
                 storedCurseForgeApiKey = prefs.CurseForgeApiKey ?? string.Empty;
                 storedNexusModsApiKey = prefs.NexusModsApiKey ?? string.Empty;
+                storedDiscordBotToken = prefs.DiscordBotToken ?? string.Empty;
+                storedDiscordGuildId = prefs.DiscordGuildId ?? string.Empty;
+                storedDiscordPublicChannelId = prefs.DiscordPublicChannelId ?? string.Empty;
+                storedDiscordAdminChannelId = prefs.DiscordAdminChannelId ?? string.Empty;
+                storedDiscordAdminRoleIds = prefs.DiscordAdminRoleIds ?? string.Empty;
+                discordAutoConnect = prefs.DiscordAutoConnect;
+                discordPublicMessageId = ParseUlongOrDefault(prefs.DiscordPublicMessageId);
+                discordAdminMessageId = ParseUlongOrDefault(prefs.DiscordAdminMessageId);
+                discordBotTokenTextBox.Text = storedDiscordBotToken;
+                discordGuildIdTextBox.Text = storedDiscordGuildId;
+                discordPublicChannelIdTextBox.Text = storedDiscordPublicChannelId;
+                discordAdminChannelIdTextBox.Text = storedDiscordAdminChannelId;
+                discordAdminRoleIdsTextBox.Text = storedDiscordAdminRoleIds;
+                discordAutoConnectCheckBox.Checked = discordAutoConnect;
+                if (prefs.DiscordRefreshSeconds > 0)
+                {
+                    discordRefreshSecondsNumeric.Value = Math.Min(discordRefreshSecondsNumeric.Maximum, Math.Max(discordRefreshSecondsNumeric.Minimum, prefs.DiscordRefreshSeconds));
+                }
                 selectedModsProvider = string.Equals(prefs.ModsProvider, ModProviderNexusMods, StringComparison.OrdinalIgnoreCase)
                     ? ModProviderNexusMods
                     : ModProviderCurseForge;
@@ -907,6 +937,7 @@ namespace WindroseServerManager.Desktop
                 }
 
                 RefreshModsProviderUi();
+                RefreshDiscordUi();
                 ApplySavedWindowLayout(prefs);
             }
             catch
@@ -940,6 +971,15 @@ namespace WindroseServerManager.Desktop
                     ModsProvider = GetSelectedModsProvider(),
                     CurseForgeApiKey = storedCurseForgeApiKey,
                     NexusModsApiKey = storedNexusModsApiKey,
+                    DiscordBotToken = storedDiscordBotToken,
+                    DiscordGuildId = storedDiscordGuildId,
+                    DiscordPublicChannelId = storedDiscordPublicChannelId,
+                    DiscordAdminChannelId = storedDiscordAdminChannelId,
+                    DiscordAdminRoleIds = storedDiscordAdminRoleIds,
+                    DiscordAutoConnect = discordAutoConnectCheckBox.Checked,
+                    DiscordRefreshSeconds = Decimal.ToInt32(discordRefreshSecondsNumeric.Value),
+                    DiscordPublicMessageId = discordPublicMessageId > 0 ? discordPublicMessageId.ToString() : string.Empty,
+                    DiscordAdminMessageId = discordAdminMessageId > 0 ? discordAdminMessageId.ToString() : string.Empty,
                     ScheduledBackupEnabled = scheduledBackupEnabledCheckBox.Checked,
                     ScheduledBackupIntervalHours = Decimal.ToInt32(scheduledBackupIntervalNumeric.Value),
                     ScheduledBackupType = scheduledBackupTypeComboBox.SelectedItem != null ? scheduledBackupTypeComboBox.SelectedItem.ToString() : "Captain + World Settings",

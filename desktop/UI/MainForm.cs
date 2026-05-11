@@ -10,6 +10,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
@@ -91,6 +92,11 @@ namespace WindroseServerManager.Desktop
         private readonly Button rconBanButton;
         private readonly Button rconUnbanButton;
         private readonly Button rconBanListButton;
+        private readonly Button saveDiscordSettingsButton;
+        private readonly Button connectDiscordButton;
+        private readonly Button publishDiscordPublicPanelButton;
+        private readonly Button publishDiscordAdminPanelButton;
+        private readonly Button refreshDiscordPanelsButton;
         private readonly Button setActiveWorldButton;
         private readonly Button toggleWarningsButton;
         private readonly Label statusLabel;
@@ -137,6 +143,14 @@ namespace WindroseServerManager.Desktop
         private readonly TextBox rconAllowedIpsTextBox;
         private readonly NumericUpDown rconMaxFailedAttemptsNumeric;
         private readonly NumericUpDown rconTimeoutNumeric;
+        private readonly TextBox discordBotTokenTextBox;
+        private readonly TextBox discordGuildIdTextBox;
+        private readonly TextBox discordPublicChannelIdTextBox;
+        private readonly TextBox discordAdminChannelIdTextBox;
+        private readonly TextBox discordAdminRoleIdsTextBox;
+        private readonly NumericUpDown discordRefreshSecondsNumeric;
+        private readonly CheckBox discordAutoConnectCheckBox;
+        private readonly Label discordStatusLabel;
         private readonly CheckBox rconEnableLoggingCheckBox;
         private readonly CheckBox rconSecureEnabledCheckBox;
         private readonly TextBox rconAesKeyTextBox;
@@ -164,6 +178,7 @@ namespace WindroseServerManager.Desktop
         private readonly ToolTip helpToolTip;
         private readonly Timer processPollTimer;
         private readonly Timer fileLogPollTimer;
+        private readonly Timer discordRefreshTimer;
 
         private readonly TextBox serverNameTextBox;
         private readonly TextBox inviteCodeTextBox;
@@ -238,6 +253,16 @@ namespace WindroseServerManager.Desktop
         private string selectedModsProvider = ModProviderCurseForge;
         private string storedCurseForgeApiKey = string.Empty;
         private string storedNexusModsApiKey = string.Empty;
+        private string storedDiscordBotToken = string.Empty;
+        private string storedDiscordGuildId = string.Empty;
+        private string storedDiscordPublicChannelId = string.Empty;
+        private string storedDiscordAdminChannelId = string.Empty;
+        private string storedDiscordAdminRoleIds = string.Empty;
+        private bool discordAutoConnect;
+        private ulong discordPublicMessageId;
+        private ulong discordAdminMessageId;
+        private bool discordConnectionBusy;
+        private bool discordPanelsBusy;
         private GroupBox discoverModsGroup;
 
         private string PreferencesPath
@@ -280,6 +305,9 @@ namespace WindroseServerManager.Desktop
             fileLogPollTimer.Interval = 1500;
             fileLogPollTimer.Tick += delegate { PollServerFileLog(); };
             fileLogPollTimer.Start();
+            discordRefreshTimer = new Timer();
+            discordRefreshTimer.Interval = 60000;
+            discordRefreshTimer.Tick += delegate { HandleDiscordRefreshTick(); };
             scheduledBackupTimer = new Timer();
             scheduledBackupTimer.Interval = 60000;
             scheduledBackupTimer.Tick += delegate { HandleScheduledBackupTick(); };
@@ -663,6 +691,7 @@ namespace WindroseServerManager.Desktop
             var modsTab = new ThemedTabPage("Mods");
             var manageModsTab = new ThemedTabPage("Manage Mods");
             var rconTab = new ThemedTabPage("RCON");
+            var discordTab = new ThemedTabPage("Discord");
             var backupTab = new ThemedTabPage("Backups");
             var quarterdeckTab = new ThemedTabPage("Quarterdeck");
             var operationsTab = new ThemedTabPage("Logbook");
@@ -671,6 +700,7 @@ namespace WindroseServerManager.Desktop
             tabs.TabPages.Add(modsTab);
             tabs.TabPages.Add(manageModsTab);
             tabs.TabPages.Add(rconTab);
+            tabs.TabPages.Add(discordTab);
             tabs.TabPages.Add(backupTab);
             tabs.TabPages.Add(quarterdeckTab);
             tabs.TabPages.Add(operationsTab);
@@ -1174,6 +1204,11 @@ namespace WindroseServerManager.Desktop
             testRconButton = new Button();
             refreshRconPlayersButton = new Button();
             viewRconLicenseButton = new Button();
+            saveDiscordSettingsButton = new Button();
+            connectDiscordButton = new Button();
+            publishDiscordPublicPanelButton = new Button();
+            publishDiscordAdminPanelButton = new Button();
+            refreshDiscordPanelsButton = new Button();
             rconHelpButton = new Button();
             rconInfoButton = new Button();
             rconShowPlayersButton = new Button();
@@ -1184,15 +1219,23 @@ namespace WindroseServerManager.Desktop
             rconUnbanButton = new Button();
             rconBanListButton = new Button();
             rconStatusLabel = new Label();
+            discordStatusLabel = new Label();
             rconDllPathTextBox = new TextBox();
             rconSelectedAccountIdTextBox = new TextBox();
             rconBanReasonTextBox = new TextBox();
+            discordBotTokenTextBox = new TextBox();
+            discordGuildIdTextBox = new TextBox();
+            discordPublicChannelIdTextBox = new TextBox();
+            discordAdminChannelIdTextBox = new TextBox();
+            discordAdminRoleIdsTextBox = new TextBox();
             rconBindAddressTextBox = new TextBox();
             rconPortNumeric = new NumericUpDown();
             rconPasswordTextBox = new TextBox();
             rconAllowedIpsTextBox = new TextBox();
             rconMaxFailedAttemptsNumeric = new NumericUpDown();
             rconTimeoutNumeric = new NumericUpDown();
+            discordRefreshSecondsNumeric = new NumericUpDown();
+            discordAutoConnectCheckBox = new CheckBox();
             rconEnableLoggingCheckBox = new CheckBox();
             rconSecureEnabledCheckBox = new CheckBox();
             rconAesKeyTextBox = new TextBox();
@@ -1773,6 +1816,119 @@ namespace WindroseServerManager.Desktop
 
             configureTabScrollRange(rconScrollPanel, rconRootLayout);
 
+            var discordScrollPanel = new Panel();
+            discordScrollPanel.Dock = DockStyle.Fill;
+            discordScrollPanel.AutoScroll = true;
+            discordScrollPanel.Margin = new Padding(0);
+            discordTab.Controls.Add(discordScrollPanel);
+
+            var discordRootLayout = new TableLayoutPanel();
+            discordRootLayout.Dock = DockStyle.Top;
+            discordRootLayout.AutoSize = true;
+            discordRootLayout.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            discordRootLayout.Margin = new Padding(0);
+            discordRootLayout.ColumnCount = 1;
+            discordRootLayout.RowCount = 2;
+            discordRootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            discordRootLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            discordScrollPanel.Controls.Add(discordRootLayout);
+
+            var discordSettingsGroup = CreateGroupBox("Discord Bot", 975, 250);
+            discordSettingsGroup.Dock = DockStyle.Top;
+            discordSettingsGroup.Margin = new Padding(0);
+            discordRootLayout.Controls.Add(discordSettingsGroup, 0, 0);
+
+            var discordSettingsContainer = new TableLayoutPanel();
+            discordSettingsContainer.Dock = DockStyle.Top;
+            discordSettingsContainer.AutoSize = true;
+            discordSettingsContainer.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            discordSettingsContainer.ColumnCount = 1;
+            discordSettingsContainer.RowCount = 3;
+            discordSettingsContainer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            discordSettingsContainer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            discordSettingsContainer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            discordSettingsGroup.Controls.Add(discordSettingsContainer);
+
+            var discordIntroLabel = new Label();
+            discordIntroLabel.AutoSize = true;
+            discordIntroLabel.MaximumSize = new Size(920, 0);
+            discordIntroLabel.Text = "Discord integration runs only while Captain's Console is open. Connect a bot here, then publish a public status panel and an admin panel that can trigger RCON actions.";
+            discordSettingsContainer.Controls.Add(discordIntroLabel, 0, 0);
+
+            var discordSettingsLayout = CreateFieldGrid();
+            discordSettingsLayout.MinimumSize = new Size(0, 0);
+            discordSettingsContainer.Controls.Add(discordSettingsLayout, 0, 1);
+
+            AddLabeledControl(discordSettingsLayout, "Bot Token", discordBotTokenTextBox, 0, 0, 280);
+            AddLabeledControl(discordSettingsLayout, "Guild ID", discordGuildIdTextBox, 1, 0, 220);
+            AddLabeledControl(discordSettingsLayout, "Public Channel ID", discordPublicChannelIdTextBox, 2, 0, 220);
+            AddLabeledControl(discordSettingsLayout, "Admin Channel ID", discordAdminChannelIdTextBox, 3, 0, 220);
+            AddLabeledControl(discordSettingsLayout, "Admin Role IDs", discordAdminRoleIdsTextBox, 0, 1, 320);
+            AddLabeledControl(discordSettingsLayout, "Refresh Seconds", discordRefreshSecondsNumeric, 1, 1, 140);
+            discordAutoConnectCheckBox.Text = "Connect on app start";
+            discordAutoConnectCheckBox.AutoSize = true;
+            AddLabeledControl(discordSettingsLayout, "Options", discordAutoConnectCheckBox, 2, 1, 180);
+
+            discordBotTokenTextBox.UseSystemPasswordChar = true;
+            discordRefreshSecondsNumeric.Minimum = 15;
+            discordRefreshSecondsNumeric.Maximum = 3600;
+            discordRefreshSecondsNumeric.Value = 60;
+
+            ConfigureResponsiveFieldGrid(discordSettingsLayout, 220,
+                discordBotTokenTextBox.Parent,
+                discordGuildIdTextBox.Parent,
+                discordPublicChannelIdTextBox.Parent,
+                discordAdminChannelIdTextBox.Parent,
+                discordAdminRoleIdsTextBox.Parent,
+                discordRefreshSecondsNumeric.Parent,
+                discordAutoConnectCheckBox.Parent);
+
+            var discordButtonsPanel = new FlowLayoutPanel();
+            discordButtonsPanel.Dock = DockStyle.Top;
+            discordButtonsPanel.AutoSize = true;
+            discordButtonsPanel.AutoSizeMode = AutoSizeMode.GrowAndShrink;
+            discordButtonsPanel.WrapContents = true;
+            discordButtonsPanel.Padding = new Padding(0, 8, 0, 0);
+            discordSettingsContainer.Controls.Add(discordButtonsPanel, 0, 2);
+
+            saveDiscordSettingsButton.Text = "Save Discord Settings";
+            saveDiscordSettingsButton.Width = 150;
+            saveDiscordSettingsButton.Click += delegate { SaveDiscordSettings(); };
+            discordButtonsPanel.Controls.Add(saveDiscordSettingsButton);
+
+            connectDiscordButton.Text = "Connect Discord";
+            connectDiscordButton.Width = 130;
+            connectDiscordButton.Click += delegate { ToggleDiscordConnection(); };
+            discordButtonsPanel.Controls.Add(connectDiscordButton);
+
+            publishDiscordPublicPanelButton.Text = "Publish Public Panel";
+            publishDiscordPublicPanelButton.Width = 150;
+            publishDiscordPublicPanelButton.Click += delegate { PublishDiscordPublicPanel(); };
+            discordButtonsPanel.Controls.Add(publishDiscordPublicPanelButton);
+
+            publishDiscordAdminPanelButton.Text = "Publish Admin Panel";
+            publishDiscordAdminPanelButton.Width = 150;
+            publishDiscordAdminPanelButton.Click += delegate { PublishDiscordAdminPanel(); };
+            discordButtonsPanel.Controls.Add(publishDiscordAdminPanelButton);
+
+            refreshDiscordPanelsButton.Text = "Refresh Discord Panels";
+            refreshDiscordPanelsButton.Width = 160;
+            refreshDiscordPanelsButton.Click += delegate { RefreshDiscordPanels(); };
+            discordButtonsPanel.Controls.Add(refreshDiscordPanelsButton);
+            SyncGroupBoxHeight(discordSettingsGroup, discordSettingsContainer);
+
+            var discordStatusGroup = CreateGroupBox("Discord Status", 975, 140);
+            discordStatusGroup.Dock = DockStyle.Top;
+            discordStatusGroup.Margin = new Padding(0, 12, 0, 0);
+            discordRootLayout.Controls.Add(discordStatusGroup, 0, 1);
+
+            discordStatusLabel.AutoSize = true;
+            discordStatusLabel.MaximumSize = new Size(920, 0);
+            discordStatusLabel.Text = "Discord bot is not connected.";
+            discordStatusGroup.Controls.Add(discordStatusLabel);
+            SyncGroupBoxHeight(discordStatusGroup, discordStatusLabel);
+            configureTabScrollRange(discordScrollPanel, discordRootLayout);
+
             var steamCmdPanel = new TableLayoutPanel();
             steamCmdPanel.Dock = DockStyle.Top;
             steamCmdPanel.AutoSize = true;
@@ -2203,15 +2359,18 @@ namespace WindroseServerManager.Desktop
                 RefreshModsProviderUi();
                 LoadRconSettingsIntoUi();
                 RefreshRconStatusUi();
+                RefreshDiscordUi();
                 RefreshServerVersionInfo();
                 UpdateAppVersionUi();
                 BeginUpdateCheck(false);
                 TryAutoLoadLastServer();
+                BeginDiscordAutoConnect();
                 ApplyNativeControlTheme();
             };
 
             FormClosing += delegate
             {
+                ShutdownDiscordRuntime();
                 SavePreferences();
             };
 

@@ -24,6 +24,15 @@ namespace WindroseServerManager.Desktop
         public string ModsProvider { get; set; }
         public string CurseForgeApiKey { get; set; }
         public string NexusModsApiKey { get; set; }
+        public string DiscordBotToken { get; set; }
+        public string DiscordGuildId { get; set; }
+        public string DiscordPublicChannelId { get; set; }
+        public string DiscordAdminChannelId { get; set; }
+        public string DiscordAdminRoleIds { get; set; }
+        public bool DiscordAutoConnect { get; set; }
+        public int DiscordRefreshSeconds { get; set; }
+        public string DiscordPublicMessageId { get; set; }
+        public string DiscordAdminMessageId { get; set; }
         public bool ScheduledBackupEnabled { get; set; }
         public int ScheduledBackupIntervalHours { get; set; }
         public string ScheduledBackupType { get; set; }

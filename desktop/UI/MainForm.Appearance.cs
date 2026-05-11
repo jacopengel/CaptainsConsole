@@ -296,6 +296,11 @@ namespace WindroseServerManager.Desktop
             StyleButton(rconBanButton, currentThemeColors.ButtonDanger, currentThemeColors.ButtonText);
             StyleButton(rconUnbanButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
             StyleButton(rconBanListButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
+            StyleButton(saveDiscordSettingsButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
+            StyleButton(connectDiscordButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
+            StyleButton(publishDiscordPublicPanelButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
+            StyleButton(publishDiscordAdminPanelButton, currentThemeColors.ButtonWarning, currentThemeColors.ButtonText);
+            StyleButton(refreshDiscordPanelsButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
             StyleButton(refreshInstalledModsButton, currentThemeColors.ButtonNeutral, currentThemeColors.ButtonText);
             StyleButton(enableModButton, currentThemeColors.ButtonSuccess, currentThemeColors.ButtonText);
             StyleButton(disableModButton, currentThemeColors.ButtonWarning, currentThemeColors.ButtonText);

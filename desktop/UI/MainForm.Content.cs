@@ -108,6 +108,18 @@ namespace WindroseServerManager.Desktop
             helpToolTip.SetToolTip(disableModButton, "Disable selected mod by prefixing its folder with _disabled_.");
             helpToolTip.SetToolTip(updateModButton, "Update the selected provider-installed mod when the current provider supports in-app updates.");
             helpToolTip.SetToolTip(removeModButton, "Delete selected mod folder from ~mods.");
+            helpToolTip.SetToolTip(discordBotTokenTextBox, "Discord bot token used while Captain's Console is open.");
+            helpToolTip.SetToolTip(discordGuildIdTextBox, "Discord server (guild) ID that owns the channels and admin roles.");
+            helpToolTip.SetToolTip(discordPublicChannelIdTextBox, "Channel ID where the public status panel should be posted.");
+            helpToolTip.SetToolTip(discordAdminChannelIdTextBox, "Channel ID where the admin RCON panel should be posted.");
+            helpToolTip.SetToolTip(discordAdminRoleIdsTextBox, "Comma-separated Discord role IDs allowed to use admin panel actions. Leave empty to allow anyone with access to the message.");
+            helpToolTip.SetToolTip(discordRefreshSecondsNumeric, "How often Captain's Console refreshes Discord panels while the app is running.");
+            helpToolTip.SetToolTip(discordAutoConnectCheckBox, "Automatically connect the Discord bot whenever Captain's Console starts.");
+            helpToolTip.SetToolTip(saveDiscordSettingsButton, "Save the Discord bot and panel settings locally.");
+            helpToolTip.SetToolTip(connectDiscordButton, "Connect or disconnect the in-process Discord bot.");
+            helpToolTip.SetToolTip(publishDiscordPublicPanelButton, "Post a fresh public Discord status panel to the configured public channel.");
+            helpToolTip.SetToolTip(publishDiscordAdminPanelButton, "Post a fresh admin Discord panel with RCON action buttons to the configured admin channel.");
+            helpToolTip.SetToolTip(refreshDiscordPanelsButton, "Update the currently published Discord public/admin panel messages immediately.");
             helpToolTip.SetToolTip(worldsListView, "Select which world to inspect or edit. The active world is the one the server will boot into.");
             helpToolTip.SetToolTip(serverNameTextBox, "ServerDescription.json: ServerName. Friendly display name for the server.");
             helpToolTip.SetToolTip(inviteCodeTextBox, "ServerDescription.json: InviteCode. Official rules: at least 6 characters, only 0-9, a-z, and A-Z.");

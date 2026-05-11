@@ -60,6 +60,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 
 [Files]
 Source: "{#MyAppSourceDir}\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppSourceDir}\*.dll"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyAppSourceDir}\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyAppSourceDir}\update-feed-url.txt"; DestDir: "{app}"; Flags: ignoreversion
 

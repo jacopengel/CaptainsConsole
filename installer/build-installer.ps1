@@ -225,6 +225,10 @@ New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
 New-Item -ItemType Directory -Force -Path $assetsDir | Out-Null
 Copy-Item -LiteralPath $exePath -Destination (Join-Path $stageDir 'WindroseCaptainsConsole.exe') -Force
 
+Get-ChildItem -Path $distDir -Filter '*.dll' -File | ForEach-Object {
+  Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $stageDir $_.Name) -Force
+}
+
 $readmePath = Join-Path $root 'README.md'
 if (Test-Path $readmePath) {
   Copy-Item -LiteralPath $readmePath -Destination (Join-Path $stageDir 'README.md') -Force
